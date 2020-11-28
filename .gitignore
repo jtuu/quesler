@@ -71,3 +71,10 @@ fabric.properties
 .idea/caches/build_file_checksums.ser
 
 *.jar
+
+# ANTLR files
+*.interp
+*.tokens
+
+# Generated files
+src/assembler/parser/*.java

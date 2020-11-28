@@ -4,16 +4,6 @@
     <option name="perGrammarGenerationSettings">
       <list>
         <PerGrammarGenerationSettings>
-          <option name="fileName" value="$PROJECT_DIR$/src/assembler/pasm.g4" />
-          <option name="autoGen" value="true" />
-          <option name="outputDir" value="$PROJECT_DIR$/src/assembler" />
-          <option name="libDir" value="" />
-          <option name="encoding" value="" />
-          <option name="pkg" value="parser" />
-          <option name="language" value="Java" />
-          <option name="generateVisitor" value="true" />
-        </PerGrammarGenerationSettings>
-        <PerGrammarGenerationSettings>
           <option name="fileName" value="$PROJECT_DIR$/src/assembler/Pasm.g4" />
           <option name="autoGen" value="true" />
           <option name="outputDir" value="$PROJECT_DIR$/src" />
