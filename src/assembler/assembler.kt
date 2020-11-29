@@ -20,22 +20,28 @@ private fun splitKeep(string: String, delimiter: String): List<String> {
     return string.split(delimiter).map{it + delimiter}
 }
 
-class PasmAssembler(sourceCode: String) {
+class PasmAssembler {
     var warningsAreErrors: Boolean = false
-
-    private val sourceCode = preprocessSourceCode(sourceCode)
-    private val lexer = PasmLexer(CharStreams.fromString(preprocessSourceCode(sourceCode)))
-    private val parser = PasmParser(CommonTokenStream(lexer))
-    private val parseTree = parser.program()
 
     private fun preprocessSourceCode(sourceCode: String): String {
         return sourceCode + "\n"
     }
 
-    fun parseToAst(): AstNode {
-        val visitor = PasmVisitor(sourceCode)
+    fun parseToAst(sourceCode: String): ProgramNode {
+        val visitor = PasmVisitor(preprocessSourceCode(sourceCode))
+        val lexer = PasmLexer(CharStreams.fromString(preprocessSourceCode(sourceCode)))
+        val parser = PasmParser(CommonTokenStream(lexer))
+        val parseTree = parser.program()
         visitor.warningsAreErrors = warningsAreErrors
-        return visitor.visit(parseTree)
+        return visitor.visitProgram(parseTree)
+    }
+
+    fun assembleAst(program: ProgramNode): ByteArray {
+        return ByteArray(0) // TODO
+    }
+
+    fun assemble(sourceCode: String): ByteArray {
+        return assembleAst(parseToAst(sourceCode))
     }
 }
 
@@ -175,7 +181,7 @@ private class PasmVisitor(sourceCode: String) : PasmBaseVisitor<AstNode>() {
         throw ParseException("Malformed block", SourceLocation.fromToken(ctx.start))
     }
 
-    override fun visitProgram(ctx: PasmParser.ProgramContext): AstNode {
+    override fun visitProgram(ctx: PasmParser.ProgramContext): ProgramNode {
         return ProgramNode(ctx.blocks.map{visitBlock(it)}, SourceLocation.fromToken(ctx.start))
     }
 }
