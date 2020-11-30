@@ -1,10 +1,8 @@
 package assembler
 
 import org.antlr.v4.runtime.Token
-
-enum class Opcode {
-    NOP
-}
+import opcode_definitions.Opcode
+import opcode_definitions.opcodes
 
 class SourceLocation(val row: Int, val column: Int, val length: Int?) {
     companion object {
@@ -42,9 +40,7 @@ class LabelNode(val value: Long, sourceLocation: SourceLocation?) : AstNode(sour
 
 class OpcodeNode(val opcode: Opcode, sourceLocation: SourceLocation?) : AstNode(sourceLocation) {
     override fun toString(): String {
-        return when (opcode) {
-            Opcode.NOP -> "nop"
-        }
+        return opcodes.find{it.opcode == opcode}?.mnemonic ?: opcode.name
     }
 }
 

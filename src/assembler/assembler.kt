@@ -6,6 +6,7 @@ import org.antlr.v4.runtime.CommonTokenStream
 import org.antlr.v4.runtime.tree.TerminalNode
 import java.lang.Exception
 import kotlin.math.pow
+import opcode_definitions.Opcode
 
 class ParseException(message: String, val sourceLocation: SourceLocation? = null) : Exception(message)
 
