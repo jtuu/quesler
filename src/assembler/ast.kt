@@ -44,27 +44,37 @@ class OpcodeNode(val opcode: Opcode, sourceLocation: SourceLocation?) : AstNode(
     }
 }
 
-abstract class ArgumentNode<T>(val value: T, sourceLocation: SourceLocation?) : AstNode(sourceLocation)
+abstract class ArgumentNode<T>(val value: T, sourceLocation: SourceLocation?) : AstNode(sourceLocation) {
+    abstract val name: String
+}
 
 class IntegerNode(value: Long, sourceLocation: SourceLocation?) : ArgumentNode<Long>(value, sourceLocation) {
+    override val name =  "integer"
+
     override fun toString(): String {
         return value.toString()
     }
 }
 
 class RealNode(value: Double, sourceLocation: SourceLocation?) : ArgumentNode<Double>(value, sourceLocation) {
+    override val name = "float"
+
     override fun toString(): String {
         return value.toString()
     }
 }
 
 class StringNode(value: String, sourceLocation: SourceLocation?) : ArgumentNode<String>(value, sourceLocation) {
+    override val name = "string"
+
     override fun toString(): String {
         return "\"$value\""
     }
 }
 
 class RegisterNode(value: Long, sourceLocation: SourceLocation?) : ArgumentNode<Long>(value, sourceLocation) {
+    override val name = "register"
+
     override fun toString(): String {
         return "R$value"
     }

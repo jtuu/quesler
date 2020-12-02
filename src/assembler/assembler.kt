@@ -1,12 +1,13 @@
 package assembler
 
 import assembler.parser.*
+import opcode_definitions.VariadicParameter
 import org.antlr.v4.runtime.CharStreams
 import org.antlr.v4.runtime.CommonTokenStream
 import org.antlr.v4.runtime.tree.TerminalNode
 import java.lang.Exception
 import kotlin.math.pow
-import opcode_definitions.Opcode
+import opcode_definitions.opcodes
 
 class ParseException(message: String, val sourceLocation: SourceLocation? = null) : Exception(message)
 
@@ -127,14 +128,21 @@ private class PasmVisitor(sourceCode: String) : PasmBaseVisitor<AstNode>() {
         val opcodeMnemonic = identifier.text
         val opcodeSrcLoc = SourceLocation.fromToken(identifier.symbol)
 
-        val opcode = when (opcodeMnemonic.toLowerCase()) {
-            "nop" -> Opcode.NOP
-            else -> throw ParseException("Unknown opcode $opcodeMnemonic", opcodeSrcLoc)
-        }
+        val opcodeDef = opcodes.find{it.mnemonic == opcodeMnemonic}
+                ?: throw ParseException("Unrecognized opcode \"$opcodeMnemonic\"", opcodeSrcLoc)
 
         val arguments = ctx.arguments.map{visitArgument(it)}
 
-        return InstructionNode(OpcodeNode(opcode, opcodeSrcLoc), arguments, SourceLocation.fromToken(ctx.start))
+        for (i in arguments.indices) {
+            val providedArg = arguments[i]
+            val expectedArg = opcodeDef.parameters[i]
+
+            if (expectedArg is VariadicParameter) {
+
+            }
+        }
+
+        return InstructionNode(OpcodeNode(opcodeDef.opcode, opcodeSrcLoc), arguments, SourceLocation.fromToken(ctx.start))
     }
 
     override fun visitLabel(ctx: PasmParser.LabelContext): LabelNode {

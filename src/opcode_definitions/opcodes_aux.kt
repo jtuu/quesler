@@ -1,20 +1,63 @@
 package opcode_definitions
 
-abstract class OpcodeParameter
+import assembler.*
+import kotlin.math.abs
+import kotlin.math.pow
+import kotlin.math.sign
+import kotlin.reflect.jvm.internal.ReflectProperties
 
-class AnyParameter : OpcodeParameter()
+class TypeException(expected: String, got: String) : Exception("Expected $expected but got $got")
+class ValueException(message: String) : Exception(message)
 
-abstract class NumericParameter(val size: Int) : OpcodeParameter()
+abstract class OpcodeParameter {
+    abstract fun validateArgument(arg: ArgumentNode<*>);
+}
+
+abstract class VariadicParameter(val itemType: OpcodeParameter) : OpcodeParameter() {
+    override fun validateArgument(arg: ArgumentNode<*>) {
+        itemType.validateArgument(arg)
+    }
+}
+
+class AnyParameter : OpcodeParameter() {
+    override fun validateArgument(arg: ArgumentNode<*>) {}
+}
+
+abstract class NumericParameter(val size: Int) : OpcodeParameter() {
+    override fun validateArgument(arg: ArgumentNode<*>) {
+        val value = when (arg) {
+            is IntegerNode -> arg.value
+            is RealNode -> arg.value
+            else -> throw TypeException("a number", "a ${arg.name}")
+        }
+
+        if ((value < 0 && value < 2.0.pow(size * 8 - 1)) || value > 2.0.pow(size * 8)) {
+            throw ValueException("Value $value too large to fit in $size bytes")
+        }
+    }
+}
+
 class ByteParameter : NumericParameter(1)
 class WordParameter : NumericParameter(2)
 class DwordParameter : NumericParameter(4)
 class FloatParameter : NumericParameter(4)
 
-open class LabelParameter : OpcodeParameter()
+open class LabelParameter : OpcodeParameter() {
+    override fun validateArgument(arg: ArgumentNode<*>) {
+        val value = when (arg) {
+            is IntegerNode -> arg.value
+            else -> throw TypeException("a label", "a ${arg.name}")
+        }
+
+        if (value < 0) {
+            throw ValueException("Labels must be greater than or equal to 0")
+        }
+    }
+}
 class InstructionLabelParameter : LabelParameter()
 class DataLabelParameter : LabelParameter()
 class StringLabelParameter : LabelParameter()
-class InstructionLabelListParameter : OpcodeParameter()
+class InstructionLabelListParameter : VariadicParameter(InstructionLabelParameter())
 
 class StringParameter : OpcodeParameter()
 
@@ -29,7 +72,7 @@ class InstructionLabelRegisterReferenceParameter(access: OpcodeRegisterAccess): 
 class PointerRegisterReferenceParameter(access: OpcodeRegisterAccess): RegisterReferenceParameter(access)
 
 class RegisterTupleReferenceParameter(val tuple: List<RegisterReferenceParameter>) : OpcodeParameter()
-class RegisterReferenceListParameter(val access: OpcodeRegisterAccess) : OpcodeParameter()
+class RegisterReferenceListParameter(val access: OpcodeRegisterAccess) : VariadicParameter(AnyRegisterReferenceParameter(access))
 
 
 class PointerParameter : OpcodeParameter()
