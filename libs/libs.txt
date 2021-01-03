@@ -1,2 +1,0 @@
-antlr-4.8-complete.jar
-snakeyaml-1.27.jar
