@@ -18,4 +18,7 @@ typedef struct {
     uint32_t hash;
 } ObjString;
 
+ObjString* take_string(char* chars, size_t length);
+ObjString* copy_string(const char* chars, size_t length);
+
 #endif

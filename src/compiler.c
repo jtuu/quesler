@@ -1,9 +1,12 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "common.h"
 #include "compiler.h"
 #include "scanner.h"
 #include "opcodes.h"
+#include "value.h"
+#include "object.h"
 
 #ifdef DEBUG
 #include "debug.h"
@@ -31,7 +34,7 @@ typedef enum {
   PREC_PRIMARY
 } Precedence;
 
-typedef void (*ParseFn)(void);
+typedef void (*ParseFn)(bool can_assign);
 
 typedef struct {
     ParseFn prefix;
@@ -39,7 +42,21 @@ typedef struct {
     Precedence precedence;
 } ParseRule;
 
+typedef struct {
+    Token name;
+    size_t depth;
+    uint8_t reg;
+} Local;
+
+typedef struct {
+    Local locals[UINT8_COUNT];
+    size_t local_count;
+    int scope_depth;
+} Compiler;
+
 Parser parser;
+
+Compiler* current = NULL;
 
 Chunk* compiling_chunk;
 
@@ -48,6 +65,14 @@ static void statement(void);
 static void declaration(void);
 static ParseRule* get_rule(TokenType type);
 static void parse_precedence(Precedence precedence);
+
+static bool identifiers_equal(Token* a, Token* b) {
+    if (a->length != b->length) {
+        return false;
+    }
+
+    return memcmp(a->start, b->start, a->length) == 0;
+}
 
 static int alloc_register(void) {
     for (int i = 0; i < NUM_REGISTERS; i++) {
@@ -99,6 +124,44 @@ static void error(const char* message) {
 
 static void error_alloc_register(void) {
     error("Failed to allocate register");
+}
+
+static uint8_t make_constant(Value value) {
+    int constant = add_constant(current_chunk(), value);
+    if (constant > UINT8_MAX) {
+        error("Too many constants in one chunk");
+        return 0;
+    }
+
+    return (uint8_t) constant;
+}
+
+static uint8_t identifier_constant(Token* name) {
+    return make_constant(STRING_VAL(
+            copy_string(name->start, name->length)));
+}
+
+static Local* resolve_local(Compiler* compiler, Token* name) {
+    for (int i = compiler->local_count - 1; i >= 0; i--) {
+        Local* local = &compiler->locals[i];
+        if (identifiers_equal(name, &local->name)) {
+            if (local->depth == -1) {
+                error("Cannot access variable in its own initializer");
+            }
+
+            return local;
+        }
+    }
+
+    return NULL;
+}
+
+static void mark_initialized(void) {
+    if (current->scope_depth == 0) {
+        return;
+    }
+
+    current->locals[current->local_count - 1].depth = current->scope_depth;
 }
 
 static void advance(void) {
@@ -177,7 +240,50 @@ static void end_compiler(void) {
 
 #undef EMIT
 
-static void binary(void) {
+static void begin_scope(void) {
+    current->scope_depth++;
+}
+
+static void end_scope(void) {
+    current->scope_depth--;
+
+    int ret = alloc_register();
+    if (ret < 0) {
+        error_alloc_register();
+    } else {
+        uint8_t reg = (uint8_t) ret;
+
+        while (current->local_count > 0 &&
+            current->locals[current->local_count - 1].depth >
+                current->scope_depth) {
+            free_register(current->locals[current->local_count - 1].reg);
+
+            current->local_count--;
+        }
+
+        free_register(reg);
+    }
+}
+
+static void init_compiler(Compiler* compiler) {
+    compiler->local_count = 0;
+    compiler->scope_depth = 1;
+    current = compiler;
+}
+
+static void define_variable(uint8_t reg) {
+    if (current->scope_depth > 0) {
+        current->locals[current->local_count - 1].reg = reg;
+
+        mark_initialized();
+
+        emit_opcode(OP_STACK_POP);
+        emit_register(reg);
+        return;
+    }
+}
+
+static void binary(bool can_assign) {
 #define BINARY_OP_I(opcode) \
     do { \
         int ret; \
@@ -231,7 +337,7 @@ static void binary(void) {
 #undef BINARY_OP_I
 }
 
-static void literal(void) {
+static void literal(bool can_assign) {
     switch (parser.previous.type) {
         case TOKEN_FALSE:
             emit_dword(CONSTANT_FALSE);
@@ -244,12 +350,32 @@ static void literal(void) {
     }
 }
 
-static void grouping(void) {
+static void named_variable(Token name, bool can_assign) {
+    Local* local = resolve_local(current, &name);
+    if (local == NULL) {
+        error("Could not resolve variable");
+    }
+
+    if (can_assign && match(TOKEN_EQUAL)) {
+        expression();
+        emit_opcode(OP_STACK_POP);
+        emit_register(local->reg);
+    } else {
+        emit_opcode(OP_STACK_PUSH);
+        emit_register(local->reg);
+    }
+}
+
+static void variable(bool can_assign) {
+    named_variable(parser.previous, can_assign);
+}
+
+static void grouping(bool can_assign) {
     expression();
     consume(TOKEN_RIGHT_PAREN, "Expected ')' after expression");
 }
 
-static void number_integer(void) {
+static void number_integer(bool can_assign) {
     int32_t value = (int32_t) strtol(parser.previous.start, NULL, 10);
 
     int ret = alloc_register();
@@ -267,7 +393,7 @@ static void number_integer(void) {
     }
 }
 
-static void unary(void) {
+static void unary(bool can_assign) {
     TokenType operator_type = parser.previous.type;
 
     parse_precedence(PREC_UNARY);
@@ -330,12 +456,12 @@ ParseRule rules[] = {
   [TOKEN_BANG]          = {unary,          NULL,   PREC_NONE},
   [TOKEN_BANG_EQUAL]    = {NULL,           binary, PREC_EQUALITY},
   [TOKEN_EQUAL]         = {NULL,           NULL,   PREC_NONE},
-  [TOKEN_EQUAL_EQUAL]   = {NULL,           binary, PREC_NONE},
-  [TOKEN_GREATER]       = {NULL,           binary, PREC_NONE},
-  [TOKEN_GREATER_EQUAL] = {NULL,           binary, PREC_NONE},
-  [TOKEN_LESS]          = {NULL,           binary, PREC_NONE},
-  [TOKEN_LESS_EQUAL]    = {NULL,           binary, PREC_NONE},
-  [TOKEN_IDENTIFIER]    = {NULL,           NULL,   PREC_NONE},
+  [TOKEN_EQUAL_EQUAL]   = {NULL,           binary, PREC_EQUALITY},
+  [TOKEN_GREATER]       = {NULL,           binary, PREC_COMPARISON},
+  [TOKEN_GREATER_EQUAL] = {NULL,           binary, PREC_COMPARISON},
+  [TOKEN_LESS]          = {NULL,           binary, PREC_COMPARISON},
+  [TOKEN_LESS_EQUAL]    = {NULL,           binary, PREC_COMPARISON},
+  [TOKEN_IDENTIFIER]    = {variable,       NULL,   PREC_NONE},
   [TOKEN_STRING]        = {NULL,           NULL,   PREC_NONE},
   [TOKEN_INTEGER]       = {number_integer, NULL,   PREC_NONE},
   // [TOKEN_FLOAT]         = {number_float,   NULL,   PREC_NONE},
@@ -364,13 +490,61 @@ static void parse_precedence(Precedence precedence) {
         return;
     }
 
-    prefix_rule();
+    bool can_assign = precedence <= PREC_ASSIGNMENT;
+    prefix_rule(can_assign);
 
     while (precedence <= get_rule(parser.current.type)->precedence) {
         advance();
         ParseFn infix_rule = get_rule(parser.previous.type)->infix;
-        infix_rule();
+        infix_rule(can_assign);
     }
+
+    if (can_assign && match(TOKEN_EQUAL)) {
+        error("Invalid target for assignment");
+    }
+}
+
+static void add_local(Token name) {
+    if (current->local_count >= UINT8_COUNT) {
+        error("Too many local variable in scope");
+        return;
+    }
+
+    Local* local = &current->locals[current->local_count++];
+    local->name = name;
+    local->depth = -1;
+    local->reg = 0;
+}
+
+static void declare_variable(void) {
+    if (current->scope_depth == 0) {
+        return;
+    }
+
+    Token* name = &parser.previous;
+    for (int i = current->local_count - 1; i >= 0; i--) {
+        Local* local = &current->locals[i];
+        if (local->depth != -1 && local->depth < current->scope_depth) {
+            break;
+        }
+
+        if (identifiers_equal(name, &local->name)) {
+            error("Identifier has already been declared");
+        }
+    }
+
+    add_local(*name);
+}
+
+static int parse_variable(const char* error) {
+    consume(TOKEN_IDENTIFIER, error);
+
+    declare_variable();
+    if (current->scope_depth > 0) {
+        return alloc_register();
+    }
+
+    return identifier_constant(&parser.previous);
 }
 
 static ParseRule* get_rule(TokenType type) {
@@ -379,6 +553,51 @@ static ParseRule* get_rule(TokenType type) {
 
 static void expression(void) {
     parse_precedence(PREC_ASSIGNMENT);
+}
+
+static void block(void) {
+    while (!check(TOKEN_RIGHT_BRACE) && !check(TOKEN_EOF)) {
+        declaration();
+    }
+
+    consume(TOKEN_RIGHT_BRACE, "Expected '}' after block");
+}
+
+static void let_declaration(void) {
+    int ret = parse_variable("Expected variable name");
+
+    if (ret < 0) {
+        error_alloc_register();
+        return;
+    }
+
+    uint8_t reg = (uint8_t) ret;
+
+    if (match(TOKEN_EQUAL)) {
+        expression();
+    } else {
+        int ret2 = alloc_register();
+
+        if (ret < 0) {
+            error_alloc_register();
+            return;
+        } else {
+            uint8_t reg2 = (uint8_t) ret;
+
+            emit_opcode(OP_LETI);
+            emit_register(reg2);
+            emit_dword(0);
+
+            emit_opcode(OP_STACK_PUSH);
+            emit_register(reg2);
+
+            free_register(reg2);
+        }
+    }
+
+    consume(TOKEN_SEMICOLON, "Expected ';' after variable declaration");
+
+    define_variable(reg);
 }
 
 static void expression_statement(void) {
@@ -476,7 +695,11 @@ static void synchronize(void) {
 }
 
 static void declaration(void) {
-    statement();
+    if (match(TOKEN_LET)) {
+        let_declaration();
+    } else {
+        statement();
+    }
 
     if (parser.panic_mode) {
         synchronize();
@@ -486,6 +709,10 @@ static void declaration(void) {
 static void statement(void) {
     if (match(TOKEN_PRINT)) {
         print_statement();
+    } else if (match(TOKEN_LEFT_BRACE)) {
+        begin_scope();
+        block();
+        end_scope();
     } else {
         expression_statement();
     }
@@ -494,6 +721,8 @@ static void statement(void) {
 bool compile(const char* source, Chunk* chunk) {
     init_scanner(source);
 
+    Compiler compiler;
+    init_compiler(&compiler);
     compiling_chunk = chunk;
 
     parser.had_error = false;
