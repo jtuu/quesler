@@ -36,8 +36,6 @@ typedef enum {
 
 #define VARIABLE_SIZED -1
 
-const int parameter_sizes[NUM_PARAMETER_KINDS];
-
 typedef struct {
     const uint16_t opcode;
     const char *name;
@@ -555,7 +553,6 @@ typedef enum {
 } Opcode;
 
 #define NUM_OPCODES 505
-const OpcodeDefinition opcodes[NUM_OPCODES];
 
 const OpcodeDefinition* get_opcode_definition(Opcode opcode);
 

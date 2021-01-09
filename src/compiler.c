@@ -381,7 +381,7 @@ static void expression(void) {
     parse_precedence(PREC_ASSIGNMENT);
 }
 
-static void expression_statement() {
+static void expression_statement(void) {
     expression();
     consume(TOKEN_SEMICOLON, "Expected ';' after expression");
 
@@ -450,7 +450,7 @@ static void print_statement(void) {
     }
 }
 
-static void synchronize() {
+static void synchronize(void) {
     parser.panic_mode = false;
 
     while (parser.current.type != TOKEN_EOF) {

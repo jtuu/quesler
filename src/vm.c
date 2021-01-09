@@ -91,7 +91,7 @@ static uint16_t* process_string_tags(uint16_t* str) {
                     case TAG_REGISTER: {
                         uint8_t reg = 0;
                         do {
-                            reg = reg * 10 + (*tag_value_start - '0');
+                            reg = (uint8_t) (reg * 10 + (*tag_value_start - '0'));
                         } while (++tag_value_start < cur_pos);
 
                         int32_t val = AS_DWORD(vm.registers[reg]);
@@ -216,7 +216,6 @@ static InterpretResult run(void) {
 
         const OpcodeDefinition* opcode_def = get_opcode_definition(opcode);
 
-        bool has_params = opcode_def->parameters[0] != T_NONE;
         bool has_stack_args = opcode_def->parameters[0] == T_ARGS;
 
         Value stack_args[ARG_STACK_LEN];
