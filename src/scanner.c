@@ -236,6 +236,8 @@ Token scan_token() {
                 return make_token(TOKEN_LESS_EQUAL);
             } else if (match('<')) {
                 return make_token(TOKEN_LESS_LESS);
+            } else {
+                return make_token(TOKEN_LESS);
             }
             break;
         case '>':
@@ -243,6 +245,8 @@ Token scan_token() {
                 return make_token(TOKEN_GREATER_EQUAL);
             } else if (match('>')) {
                 return make_token(TOKEN_GREATER_GREATER);
+            } else {
+                return make_token(TOKEN_GREATER);
             }
             break;
         case '"':

@@ -744,6 +744,75 @@ static void expression_statement(void) {
     }
 }
 
+static void for_statement(void) {
+    begin_scope();
+
+    consume(TOKEN_LEFT_PAREN, "Expected '(' after 'for'");
+
+    int ret = alloc_register();
+
+    if (ret < 0) {
+        error_alloc_register();
+        return;
+    }
+
+    uint8_t reg = (uint8_t) ret;
+    
+    if (match(TOKEN_SEMICOLON)) {
+        // No initializer
+    } else if (match(TOKEN_LET)) {
+        let_declaration();
+    } else {
+        expression_statement();
+    }
+
+    size_t exit_label = take_label();
+    size_t start_label = put_label_here();
+
+    if (!match(TOKEN_SEMICOLON)) {
+        expression();
+        consume(TOKEN_SEMICOLON, "Expected ';' after condition");
+
+        emit_opcode(OP_STACK_POP);
+        emit_register(reg);
+
+        emit_opcode(OP_JMPI_EQ);
+        emit_register(reg);
+        emit_dword(CONSTANT_FALSE);
+        emit_word(exit_label);
+    }
+
+    if (!match(TOKEN_RIGHT_PAREN)) {
+        size_t body_label = take_label();
+        emit_opcode(OP_JMP);
+        emit_word(body_label);
+
+        size_t orig_start_label = start_label;
+        start_label = put_label_here();
+
+        expression();
+        emit_opcode(OP_STACK_POP);
+        emit_register(reg);
+        consume(TOKEN_RIGHT_PAREN, "Expected ')' after for clauses");
+
+        emit_opcode(OP_JMP);
+        emit_word(orig_start_label);
+
+        set_label_here(body_label);
+    }
+
+    statement();
+
+    emit_opcode(OP_JMP);
+    emit_word(start_label);
+
+    set_label_here(exit_label);
+
+    free_register(reg);
+
+    end_scope();
+}
+
 static void if_statement(void) {
     consume(TOKEN_LEFT_PAREN, "Expected '(' after 'if'");
     expression();
@@ -917,6 +986,8 @@ static void statement(void) {
         print_statement();
     } else if (match(TOKEN_IF)) {
         if_statement();
+    } else if (match(TOKEN_FOR)) {
+        for_statement();
     } else if (match(TOKEN_WHILE)) {
         while_statement();
     } else if (match(TOKEN_LEFT_BRACE)) {
