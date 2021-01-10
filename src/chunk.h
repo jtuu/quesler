@@ -10,7 +10,7 @@ typedef struct {
     uint8_t* code;
     size_t* lines;
     ValueArray constants;
-    int16_t* labels;
+    int32_t* labels;
     size_t labels_count;
     size_t labels_capacity;
 } Chunk;
@@ -19,7 +19,7 @@ void init_chunk(Chunk* chunk);
 void write_chunk(Chunk* chunk, size_t add_size, uint8_t* bytes, size_t line);
 void free_chunk(Chunk* chunk);
 size_t add_constant(Chunk* chunk, Value value);
-void set_chunk_label_offset(Chunk* chunk, size_t label, int16_t offset);
+void set_chunk_label_offset(Chunk* chunk, size_t label, int32_t offset);
 
 #define WRITE_CHUNK(chunk, type, value, line) \
     do { \

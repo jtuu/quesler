@@ -83,9 +83,9 @@ size_t disassemble_instruction(Chunk* chunk, size_t offset) {
                     break;
                 }
                 case T_FUNC: {
-                    size_t label = READ2(arg);
-                    int32_t offset = chunk->labels[label];
-                    printf("%lu (%d)", label, offset);
+                    size_t label = (size_t) READ2(arg);
+                    int32_t label_offset = chunk->labels[label];
+                    printf("%lu (%d)", label, label_offset);
                     break;
                 }
                 default:

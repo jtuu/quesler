@@ -45,7 +45,7 @@ typedef struct {
 
 typedef struct {
     Token name;
-    size_t depth;
+    int depth;
     uint8_t reg;
 } Local;
 
@@ -135,13 +135,13 @@ static size_t take_label(void) {
     return label;
 }
 
-static void set_label_offset(size_t label, int16_t offset) {
+static void set_label_offset(size_t label, int32_t offset) {
     set_chunk_label_offset(current_chunk(), label, offset);
 }
 
 static size_t set_label_here(size_t label) {
     Chunk* chunk = current_chunk();
-    set_chunk_label_offset(chunk, label, chunk->count);
+    set_chunk_label_offset(chunk, label, (int16_t) chunk->count);
     return label;
 }
 
@@ -151,7 +151,7 @@ static size_t put_label_here(void) {
 }
 
 static uint8_t make_constant(Value value) {
-    int constant = add_constant(current_chunk(), value);
+    size_t constant = add_constant(current_chunk(), value);
     if (constant > UINT8_MAX) {
         error("Too many constants in one chunk");
         return 0;
@@ -166,7 +166,7 @@ static uint8_t identifier_constant(Token* name) {
 }
 
 static Local* resolve_local(Compiler* compiler, Token* name) {
-    for (int i = compiler->local_count - 1; i >= 0; i--) {
+    for (int i = (int) compiler->local_count - 1; i >= 0; i--) {
         Local* local = &compiler->locals[i];
         if (identifiers_equal(name, &local->name)) {
             if (local->depth == -1) {
@@ -268,10 +268,6 @@ static void end_compiler(void) {
 
 #undef EMIT
 
-static void patch_jump(int32_t offset) {
-
-}
-
 static void begin_scope(void) {
     current->scope_depth++;
 }
@@ -316,6 +312,8 @@ static void define_variable(uint8_t reg) {
 }
 
 static void binary(bool can_assign) {
+    UNUSED(can_assign);
+
 #define BINARY_OP_I(opcode) \
     do { \
         int ret; \
@@ -370,6 +368,8 @@ static void binary(bool can_assign) {
 }
 
 static void literal(bool can_assign) {
+    UNUSED(can_assign);
+
     int ret = alloc_register();
 
     if (ret < 0) {
@@ -427,11 +427,15 @@ static void variable(bool can_assign) {
 }
 
 static void grouping(bool can_assign) {
+    UNUSED(can_assign);
+
     expression();
     consume(TOKEN_RIGHT_PAREN, "Expected ')' after expression");
 }
 
 static void number_integer(bool can_assign) {
+    UNUSED(can_assign);
+
     int32_t value = (int32_t) strtol(parser.previous.start, NULL, 10);
 
     int ret = alloc_register();
@@ -450,6 +454,8 @@ static void number_integer(bool can_assign) {
 }
 
 static void unary(bool can_assign) {
+    UNUSED(can_assign);
+
     TokenType operator_type = parser.previous.type;
 
     parse_precedence(PREC_UNARY);
@@ -578,7 +584,7 @@ static void declare_variable(void) {
     }
 
     Token* name = &parser.previous;
-    for (int i = current->local_count - 1; i >= 0; i--) {
+    for (int i = (int) current->local_count - 1; i >= 0; i--) {
         Local* local = &current->locals[i];
         if (local->depth != -1 && local->depth < current->scope_depth) {
             break;
@@ -638,7 +644,7 @@ static void let_declaration(void) {
             error_alloc_register();
             return;
         } else {
-            uint8_t reg2 = (uint8_t) ret;
+            uint8_t reg2 = (uint8_t) ret2;
 
             emit_opcode(OP_LETI);
             emit_register(reg2);

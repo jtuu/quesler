@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <stdio.h>
 #include "chunk.h"
 #include "memory.h"
 
@@ -42,11 +43,15 @@ size_t add_constant(Chunk* chunk, Value value) {
     return chunk->constants.count - 1;
 }
 
-void set_chunk_label_offset(Chunk* chunk, size_t label, int16_t offset) {
+void set_chunk_label_offset(Chunk* chunk, size_t label, int32_t offset) {
+    if (label > UINT16_MAX) {
+        fprintf(stderr, "Label too large\n");
+    }
+
     while (chunk->labels_capacity < label + 1) {
         size_t old_capacity = chunk->labels_capacity;
         chunk->labels_capacity = GROW_CAPACITY(old_capacity);
-        chunk->labels = GROW_ARRAY(int16_t, chunk->labels,
+        chunk->labels = GROW_ARRAY(int32_t, chunk->labels,
             old_capacity, chunk->labels_capacity);
     }
 
