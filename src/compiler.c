@@ -370,16 +370,37 @@ static void binary(bool can_assign) {
 }
 
 static void literal(bool can_assign) {
+    int ret = alloc_register();
+
+    if (ret < 0) {
+        error_alloc_register();
+        return;
+    }
+
+    uint8_t reg = (uint8_t) ret;
+
     switch (parser.previous.type) {
         case TOKEN_FALSE:
+            emit_opcode(OP_LETI);
+            emit_register(reg);
             emit_dword(CONSTANT_FALSE);
+
+            emit_opcode(OP_STACK_PUSH);
+            emit_register(reg);
             break;
         case TOKEN_TRUE:
+            emit_opcode(OP_LETI);
+            emit_register(reg);
             emit_dword(CONSTANT_TRUE);
+
+            emit_opcode(OP_STACK_PUSH);
+            emit_register(reg);
             break;
         default:
             return;
     }
+
+    free_register(reg);
 }
 
 static void named_variable(Token name, bool can_assign) {

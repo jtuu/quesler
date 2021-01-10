@@ -143,7 +143,7 @@ static TokenType identifier_type(void) {
         case 'n': return check_keyword(1, 3, "ull", TOKEN_NULL);
         case 'p': return check_keyword(1, 4, "rint", TOKEN_PRINT);
         case 'r': return check_keyword(1, 5, "eturn", TOKEN_RETURN);
-        case 't': return check_keyword(1, 4, "rue", TOKEN_TRUE);
+        case 't': return check_keyword(1, 3, "rue", TOKEN_TRUE);
         case 'w': return check_keyword(1, 4, "hile", TOKEN_WHILE);
     }
 

@@ -1,12 +1,12 @@
 let foo = 123;
 
-if (1) {
+if (true) {
     foo = 321;
 }
 
 print foo;
 
-if (0) {
+if (false) {
     foo = 777;
 } else {
     foo = 999;
