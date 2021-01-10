@@ -840,6 +840,41 @@ static void print_statement(void) {
     }
 }
 
+static void while_statement(void) {
+    size_t start_label = put_label_here();
+
+    consume(TOKEN_LEFT_PAREN, "Expected '(' after 'while'");
+    expression();
+    consume(TOKEN_RIGHT_PAREN, "Expected ')' after condition");
+
+    int ret = alloc_register();
+
+    if (ret < 0) {
+        error_alloc_register();
+        return;
+    }
+
+    uint8_t reg = (uint8_t) ret;
+    size_t exit_label = take_label();
+
+    emit_opcode(OP_STACK_POP);
+    emit_register(reg);
+
+    emit_opcode(OP_JMPI_EQ);
+    emit_register(reg);
+    emit_dword(CONSTANT_FALSE);
+    emit_word(exit_label);
+
+    statement();
+
+    emit_opcode(OP_JMP);
+    emit_word(start_label);
+
+    set_label_here(exit_label);
+
+    free_register(reg);
+}
+
 static void synchronize(void) {
     parser.panic_mode = false;
 
@@ -882,6 +917,8 @@ static void statement(void) {
         print_statement();
     } else if (match(TOKEN_IF)) {
         if_statement();
+    } else if (match(TOKEN_WHILE)) {
+        while_statement();
     } else if (match(TOKEN_LEFT_BRACE)) {
         begin_scope();
         block();
