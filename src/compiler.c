@@ -264,6 +264,10 @@ static void emit_string(uint16_t* str) {
 
 static void end_compiler(void) {
     emit_opcode(OP_RET);
+
+#ifdef DEBUG
+    disassemble_chunk(current_chunk(), "program");
+#endif
 }
 
 #undef EMIT
@@ -453,6 +457,68 @@ static void number_integer(bool can_assign) {
     }
 }
 
+static void and_(bool can_assign) {
+    UNUSED(can_assign);
+
+    int ret = alloc_register();
+
+    if (ret < 0) {
+        error_alloc_register();
+        return;
+    }
+
+    uint8_t reg = (uint8_t) ret;
+    size_t label = take_label();
+
+    emit_opcode(OP_STACK_POP);
+    emit_register(reg);
+
+    emit_opcode(OP_JMPI_EQ);
+    emit_register(reg);
+    emit_dword(CONSTANT_FALSE);
+    emit_word(label);
+
+    parse_precedence(PREC_AND);
+
+    set_label_here(label);
+
+    free_register(reg);
+}
+
+static void or_(bool can_assign) {
+    UNUSED(can_assign);
+
+    int ret = alloc_register();
+
+    if (ret < 0) {
+        error_alloc_register();
+        return;
+    }
+
+    uint8_t reg = (uint8_t) ret;
+    size_t label = take_label();
+
+    emit_opcode(OP_STACK_POP);
+    emit_register(reg);
+
+    emit_opcode(OP_STACK_PUSH);
+    emit_register(reg);
+
+    emit_opcode(OP_JMPI_NEQ);
+    emit_register(reg);
+    emit_dword(CONSTANT_FALSE);
+    emit_word(label);
+
+    emit_opcode(OP_STACK_POP);
+    emit_register(reg);
+
+    parse_precedence(PREC_OR);
+
+    set_label_here(label);
+
+    free_register(reg);
+}
+
 static void unary(bool can_assign) {
     UNUSED(can_assign);
 
@@ -527,14 +593,14 @@ ParseRule rules[] = {
   [TOKEN_STRING]        = {NULL,           NULL,   PREC_NONE},
   [TOKEN_INTEGER]       = {number_integer, NULL,   PREC_NONE},
   // [TOKEN_FLOAT]         = {number_float,   NULL,   PREC_NONE},
-  [TOKEN_AMP_AMP]       = {NULL,           NULL,   PREC_NONE},
+  [TOKEN_AMP_AMP]       = {NULL,           and_,   PREC_AND},
   [TOKEN_ELSE]          = {NULL,           NULL,   PREC_NONE},
   [TOKEN_FALSE]         = {literal,        NULL,   PREC_NONE},
   [TOKEN_FOR]           = {NULL,           NULL,   PREC_NONE},
   [TOKEN_FUNCTION]      = {NULL,           NULL,   PREC_NONE},
   [TOKEN_IF]            = {NULL,           NULL,   PREC_NONE},
   [TOKEN_NULL]          = {NULL,           NULL,   PREC_NONE},
-  [TOKEN_PIPE_PIPE]     = {NULL,           NULL,   PREC_NONE},
+  [TOKEN_PIPE_PIPE]     = {NULL,           or_,   PREC_OR},
   [TOKEN_PRINT]         = {NULL,           NULL,   PREC_NONE},
   [TOKEN_RETURN]        = {NULL,           NULL,   PREC_NONE},
   [TOKEN_TRUE]          = {literal,        NULL,   PREC_NONE},
@@ -698,7 +764,7 @@ static void if_statement(void) {
 
     emit_opcode(OP_JMPI_EQ);
     emit_register(reg);
-    emit_dword(0);
+    emit_dword(CONSTANT_FALSE);
     emit_word((int16_t) else_label);
 
     statement();

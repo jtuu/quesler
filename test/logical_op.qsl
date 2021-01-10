@@ -1,0 +1,11 @@
+if (true && false) {
+    print false;
+}
+
+print true && false;
+
+print true || false;
+
+let foo = true || (false && true) && true || false || false;
+
+print foo;

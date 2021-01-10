@@ -269,13 +269,15 @@ static InterpretResult run(void) {
                 }
                 break;
             }
-            case OP_JMPI_EQ: {
+            case OP_JMPI_EQ: __attribute__ ((fallthrough));
+            case OP_JMPI_NEQ: {
                 uint8_t reg = READ1();
                 int32_t val1 = AS_DWORD(vm.registers[reg]);
                 int32_t val2 = READ4();
                 size_t label = (size_t) READ2();
 
-                if (val1 == val2) {
+                if ((opcode == OP_JMPI_EQ && (val1 == val2)) ||
+                    (opcode == OP_JMPI_NEQ && (val1 != val2))) {
                     int32_t offset = vm.chunk->labels[label];
 
                     if (offset < 0) {

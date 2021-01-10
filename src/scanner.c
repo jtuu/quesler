@@ -247,6 +247,12 @@ Token scan_token() {
             break;
         case '"':
             return string();
+        case '|':
+            return make_token(
+                match('|') ? TOKEN_PIPE_PIPE : TOKEN_PIPE);
+        case '&':
+            return make_token(
+                match('&') ? TOKEN_AMP_AMP : TOKEN_AMP);
     }
 
     return error_token("Unexpected character");
