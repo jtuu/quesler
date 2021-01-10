@@ -38,7 +38,11 @@ void stack_push(Value value) {
 }
 
 Value stack_pop() {
-    vm.stack_top--;
+    if (--vm.stack_top < vm.stack) {
+        fprintf(stderr, "VM: Stack underflow\n");
+        vm.stack_top = vm.stack;
+    }
+
     return *vm.stack_top;
 }
 

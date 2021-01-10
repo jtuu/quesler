@@ -360,6 +360,9 @@ static void named_variable(Token name, bool can_assign) {
         expression();
         emit_opcode(OP_STACK_POP);
         emit_register(local->reg);
+
+        emit_opcode(OP_STACK_PUSH);
+        emit_register(local->reg);
     } else {
         emit_opcode(OP_STACK_PUSH);
         emit_register(local->reg);
