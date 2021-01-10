@@ -18,6 +18,7 @@ typedef struct {
     bool had_error;
     bool panic_mode;
     bool free_registers[NUM_REGISTERS];
+    size_t labels_count;
 } Parser;
 
 typedef enum {
@@ -126,6 +127,29 @@ static void error_alloc_register(void) {
     error("Failed to allocate register");
 }
 
+static size_t take_label(void) {
+    size_t label = ++parser.labels_count;
+    if (label > UINT16_MAX) {
+        error("Too many labels");
+    }
+    return label;
+}
+
+static void set_label_offset(size_t label, int16_t offset) {
+    set_chunk_label_offset(current_chunk(), label, offset);
+}
+
+static size_t set_label_here(size_t label) {
+    Chunk* chunk = current_chunk();
+    set_chunk_label_offset(chunk, label, chunk->count);
+    return label;
+}
+
+static size_t put_label_here(void) {
+    size_t label = take_label();
+    return set_label_here(label);
+}
+
 static uint8_t make_constant(Value value) {
     int constant = add_constant(current_chunk(), value);
     if (constant > UINT8_MAX) {
@@ -220,6 +244,10 @@ static void emit_dword(int32_t dword) {
     EMIT(int32_t, dword);
 }
 
+static void emit_word(int16_t word) {
+    EMIT(int16_t, word);
+}
+
 static void emit_byte(uint8_t byte) {
     EMIT(uint8_t, byte);
 }
@@ -239,6 +267,10 @@ static void end_compiler(void) {
 }
 
 #undef EMIT
+
+static void patch_jump(int32_t offset) {
+
+}
 
 static void begin_scope(void) {
     current->scope_depth++;
@@ -619,6 +651,49 @@ static void expression_statement(void) {
     }
 }
 
+static void if_statement(void) {
+    consume(TOKEN_LEFT_PAREN, "Expected '(' after 'if'");
+    expression();
+    consume(TOKEN_RIGHT_PAREN, "Expect ')' after condition");
+
+    int ret = alloc_register();
+
+    if (ret < 0) {
+        error_alloc_register();
+        return;
+    }
+
+    uint8_t reg = (uint8_t) ret;
+    size_t else_label = take_label();
+
+    emit_opcode(OP_STACK_POP);
+    emit_register(reg);
+
+    emit_opcode(OP_JMPI_EQ);
+    emit_register(reg);
+    emit_dword(0);
+    emit_word((int16_t) else_label);
+
+    statement();
+
+    if (match(TOKEN_ELSE)) {
+        size_t else_end_label = take_label();
+
+        emit_opcode(OP_JMP);
+        emit_word((int16_t) else_end_label);
+
+        set_label_here(else_label);
+
+        statement();
+
+        set_label_here(else_end_label);
+    } else {
+        set_label_here(else_label);
+    }
+
+    free_register(reg);
+}
+
 static void print_statement(void) {
     expression();
     consume(TOKEN_SEMICOLON, "Expected ';' after expression");
@@ -712,6 +787,8 @@ static void declaration(void) {
 static void statement(void) {
     if (match(TOKEN_PRINT)) {
         print_statement();
+    } else if (match(TOKEN_IF)) {
+        if_statement();
     } else if (match(TOKEN_LEFT_BRACE)) {
         begin_scope();
         block();
@@ -735,6 +812,8 @@ bool compile(const char* source, Chunk* chunk) {
     for (size_t i = 1; i < NUM_REGISTERS; i++) {
         parser.free_registers[i] = true;
     }
+
+    set_label_offset(0, 0);
 
     advance();
     

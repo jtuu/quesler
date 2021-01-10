@@ -1,0 +1,15 @@
+let foo = 123;
+
+if (1) {
+    foo = 321;
+}
+
+print foo;
+
+if (0) {
+    foo = 777;
+} else {
+    foo = 999;
+}
+
+print foo;

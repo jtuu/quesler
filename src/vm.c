@@ -258,6 +258,34 @@ static InterpretResult run(void) {
                 }
                 break;
             }
+            case OP_JMP: {
+                size_t label = READ2();
+                int32_t offset = vm.chunk->labels[label];
+
+                if (offset < 0) {
+                    fprintf(stderr, "VM: Invalid jump target\n");
+                } else {
+                    vm.ip = vm.chunk->code + offset;
+                }
+                break;
+            }
+            case OP_JMPI_EQ: {
+                uint8_t reg = READ1();
+                int32_t val1 = AS_DWORD(vm.registers[reg]);
+                int32_t val2 = READ4();
+                size_t label = READ2();
+
+                if (val1 == val2) {
+                    int32_t offset = vm.chunk->labels[label];
+
+                    if (offset < 0) {
+                        fprintf(stderr, "VM: Invalid jump target\n");
+                    } else {
+                        vm.ip = vm.chunk->code + offset;
+                    }
+                }
+                break;
+            }
             case OP_ADDI:
                 ARITHMETIC_OP_RI(+);
                 break;

@@ -82,6 +82,12 @@ size_t disassemble_instruction(Chunk* chunk, size_t offset) {
                     arg += str_size;
                     break;
                 }
+                case T_FUNC: {
+                    size_t label = READ2(arg);
+                    int32_t offset = chunk->labels[label];
+                    printf("%lu (%d)", label, offset);
+                    break;
+                }
                 default:
                     fprintf(stderr, "Disassembler: Unknown parameter type %u\n", param_type);
                     goto done;
