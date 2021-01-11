@@ -10,6 +10,15 @@
 
 VM vm;
 
+#define READ1() (*vm.ip++)
+#define READ2() \
+    (vm.ip += 2, (vm.ip[-1] << 8 | vm.ip[-2]))
+#define READ4() \
+    (vm.ip += 4, (vm.ip[-1] << 24 | vm.ip[-2] << 16 | \
+                  vm.ip[-3] << 8  | vm.ip[-4]))
+#define READF() \
+    (vm.ip += 4, *(float*) &vm.ip[-4])
+
 static void reset_registers(void) {
     for (size_t i = 0; i < NUM_REGISTERS; i++) {
         vm.registers[i] = DWORD_VAL(0);
@@ -165,16 +174,46 @@ static uint16_t* process_string_tags(uint16_t* str) {
     return result.str;
 }
 
-static InterpretResult run(void) {
-#define READ1() (*vm.ip++)
-#define READ2() \
-    (vm.ip += 2, (vm.ip[-1] << 8 | vm.ip[-2]))
-#define READ4() \
-    (vm.ip += 4, (vm.ip[-1] << 24 | vm.ip[-2] << 16 | \
-                  vm.ip[-3] << 8  | vm.ip[-4]))
-#define READF() \
-    (vm.ip += 4, *(float*) &vm.ip[-4])
+static bool compare(uint16_t opcode, int32_t val1, int32_t val2) {
+    switch (opcode) {
+        case OP_JMP_EQ: __attribute__ ((fallthrough));
+        case OP_JMPI_EQ:
+            return val1 == val2;
+        case OP_JMP_NEQ: __attribute__ ((fallthrough));
+        case OP_JMPI_NEQ:
+            return val1 != val2;
+        case OP_JMP_GT: __attribute__ ((fallthrough));
+        case OP_JMPI_GT:
+            return val1 > val2;
+        case OP_JMP_LT: __attribute__ ((fallthrough));
+        case OP_JMPI_LT:
+            return val1 < val2;
+        case OP_JMP_GTE: __attribute__ ((fallthrough));
+        case OP_JMPI_GTE:
+            return val1 >= val2;
+        case OP_JMP_LTE: __attribute__ ((fallthrough));
+        case OP_JMPI_LTE:
+            return val1 <= val2;
+        default:
+            fprintf(stderr, "VM: Invalid comparison opcode\n");
+            break;
+    }
 
+    return false;
+}
+
+static void do_jump(size_t label) {
+    int32_t offset = vm.chunk->labels[label];
+
+    if (offset < 0) {
+        fprintf(stderr, "VM: Invalid jump target\n");
+        return;
+    }
+
+    vm.ip = vm.chunk->code + offset;
+}
+
+static InterpretResult run(void) {
 #define ARITHMETIC_OP_RI(op) \
     do { \
         uint8_t reg = READ1(); \
@@ -269,22 +308,36 @@ static InterpretResult run(void) {
                 }
                 break;
             }
-            case OP_JMPI_EQ: __attribute__ ((fallthrough));
-            case OP_JMPI_NEQ: {
+            case OP_JMP_EQ:  __attribute__ ((fallthrough));
+            case OP_JMP_NEQ: __attribute__ ((fallthrough));
+            case OP_JMP_GT:  __attribute__ ((fallthrough));
+            case OP_JMP_LT:  __attribute__ ((fallthrough));
+            case OP_JMP_GTE: __attribute__ ((fallthrough));
+            case OP_JMP_LTE: {
+                uint8_t reg1 = READ1();
+                uint8_t reg2 = READ1();
+                int32_t val1 = AS_DWORD(vm.registers[reg1]);
+                int32_t val2 = AS_DWORD(vm.registers[reg2]);
+                size_t label = (size_t) READ2();
+
+                if (compare(opcode, val1, val2)) {
+                    do_jump(label);
+                }
+                break;
+            }
+            case OP_JMPI_EQ:  __attribute__ ((fallthrough));
+            case OP_JMPI_NEQ: __attribute__ ((fallthrough));
+            case OP_JMPI_GT:  __attribute__ ((fallthrough));
+            case OP_JMPI_LT:  __attribute__ ((fallthrough));
+            case OP_JMPI_GTE: __attribute__ ((fallthrough));
+            case OP_JMPI_LTE: {
                 uint8_t reg = READ1();
                 int32_t val1 = AS_DWORD(vm.registers[reg]);
                 int32_t val2 = READ4();
                 size_t label = (size_t) READ2();
 
-                if ((opcode == OP_JMPI_EQ && (val1 == val2)) ||
-                    (opcode == OP_JMPI_NEQ && (val1 != val2))) {
-                    int32_t offset = vm.chunk->labels[label];
-
-                    if (offset < 0) {
-                        fprintf(stderr, "VM: Invalid jump target\n");
-                    } else {
-                        vm.ip = vm.chunk->code + offset;
-                    }
+                if (compare(opcode, val1, val2)) {
+                    do_jump(label);
                 }
                 break;
             }
@@ -337,10 +390,6 @@ static InterpretResult run(void) {
             reset_arg_stack();
         }
     }
-
-#undef READ1
-#undef READ2
-#undef READ4
 }
 
 InterpretResult interpret_bytecode(Chunk* chunk) {
@@ -365,3 +414,7 @@ InterpretResult interpret_source(const char* source) {
     free_chunk(&chunk);
     return result;
 }
+
+#undef READ1
+#undef READ2
+#undef READ4
