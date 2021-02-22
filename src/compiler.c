@@ -67,17 +67,8 @@ static void declaration(void);
 static ParseRule* get_rule(TokenType type);
 static void parse_precedence(Precedence precedence);
 
-size_t return_register = 1;
+uint8_t return_register = 1;
 size_t entry_point_label = 0;
-
-size_t constant_true_label;
-size_t constant_false_label;
-size_t comparison_OP_JMP_EQ_label;
-size_t comparison_OP_JMP_NEQ_label;
-size_t comparison_OP_JMP_LT_label;
-size_t comparison_OP_JMP_GT_label;
-size_t comparison_OP_JMP_LTE_label;
-size_t comparison_OP_JMP_GTE_label;
 
 static bool identifiers_equal(Token* a, Token* b) {
     if (a->length != b->length) {
@@ -300,6 +291,11 @@ static void emit_stack_push(uint8_t reg) {
     emit_register(reg);
 }
 
+static void emit_stack_peek(uint8_t reg) {
+    emit_stack_pop(reg);
+    emit_stack_push(reg);
+}
+
 static void emit_stack_push_value(int32_t val) {
     int ret = alloc_register();
 
@@ -331,55 +327,24 @@ static void emit_jump(size_t label) {
     emit_word((int16_t) label);
 }
 
-static void init_constant_subroutines(void) {
-   constant_true_label = put_label_here();
-   emit_return_with_value(CONSTANT_TRUE);
-
-   constant_false_label = put_label_here();
-   emit_return_with_value(CONSTANT_FALSE);
+static void emit_conditional_jump_rr(uint16_t opcode, uint8_t reg1, uint8_t reg2, size_t label) {
+    emit_opcode(opcode);
+    emit_register(reg1);
+    emit_register(reg2);
+    emit_word((int16_t) label);
 }
 
-static void init_comparison_subroutines(void) {
-    int ret = alloc_register();
-
-    uint8_t reg1;
-    uint8_t reg2;
-
-    if (ret < 0 || (reg1 = (uint8_t) ret, (ret = alloc_register()) < 0)) {
-        free_register(reg1);
-        error_alloc_register();
-        return;
-    }
-
-    reg2 = (uint8_t) ret;
-
-    // TODO: restore return address
-
-#define EMIT_COMP_SUBR(opcode) \
-    do { \
-        comparison_##opcode##_label = put_label_here(); \
- \
-        emit_stack_pop(reg2); \
-        emit_stack_pop(reg1); \
- \
-        emit_opcode(opcode); \
-        emit_register(reg1); \
-        emit_register(reg2); \
-        emit_word((int16_t) constant_true_label); \
- \
-        emit_jump(constant_false_label); \
-    } while (false)
-
-    EMIT_COMP_SUBR(OP_JMP_EQ);
-
-    free_register(reg1);
-    free_register(reg2);
+static void emit_conditional_jump_ri(uint16_t opcode, uint8_t reg, int32_t val, size_t label) {
+    emit_opcode(opcode);
+    emit_register(reg);
+    emit_dword(val);
+    emit_word((int16_t) label);
 }
 
 static void emit_runtime(void) {
-    init_constant_subroutines();
-    init_comparison_subroutines();
+    parser.free_registers[return_register] = false;
 
+    // End of runtime, beginning of user's code
     set_label_here(entry_point_label);
 }
 
@@ -420,8 +385,7 @@ static void define_variable(uint8_t reg) {
 
         mark_initialized();
 
-        emit_opcode(OP_STACK_POP);
-        emit_register(reg);
+        emit_stack_pop(reg);
         return;
     }
 }
@@ -429,33 +393,56 @@ static void define_variable(uint8_t reg) {
 static void binary(bool can_assign) {
     UNUSED(can_assign);
 
+    int ret;
+    uint8_t reg1, reg2;
+
+    if ((ret = alloc_register()) < 0) {
+        error_alloc_register();
+        return;
+    }
+
+    reg1 = (uint8_t) ret;
+
+    if ((ret = alloc_register()) < 0) {
+        free_register(reg1);
+        error_alloc_register();
+        return;
+    }
+
+    reg2 = (uint8_t) ret;
+
 #define BINARY_OP_I(opcode) \
     do { \
-        int ret; \
-        uint8_t reg1, reg2; \
+        emit_stack_pop(reg2); \
+        emit_stack_pop(reg1); \
  \
-        if ((ret = alloc_register()) < 0 || \
-                (reg1 = (uint8_t) ret, ret = alloc_register()) < 0) { \
-            free_register(reg1); \
-            error_alloc_register(); \
-        } else { \
-            reg2 = (uint8_t) ret; \
+        emit_opcode(opcode); \
+        emit_register(reg1); \
+        emit_register(reg2); \
  \
-            emit_opcode(OP_STACK_POP); \
-            emit_register(reg2); \
-            emit_opcode(OP_STACK_POP); \
-            emit_register(reg1); \
+        emit_stack_push(reg1); \
  \
-            emit_opcode(opcode); \
-            emit_register(reg1); \
-            emit_register(reg2); \
+        free_register(reg1); \
+        free_register(reg2); \
+    } while (false)
+
+#define COMPARISON_OP(opcode) \
+    do { \
+        size_t label_true = take_label(); \
+        size_t label_continue = take_label(); \
  \
-            emit_opcode(OP_STACK_PUSH); \
-            emit_register(reg1); \
+        emit_stack_pop(reg2); \
+        emit_stack_pop(reg1); \
  \
-            free_register(reg1); \
-            free_register(reg2); \
-        } \
+        emit_conditional_jump_rr(opcode, reg1, reg2, label_true); \
+ \
+        emit_stack_push_value(CONSTANT_FALSE); \
+        emit_jump(label_continue); \
+ \
+        set_label_here(label_true); \
+        emit_stack_push_value(CONSTANT_TRUE); \
+ \
+        set_label_here(label_continue); \
     } while (false)
 
     TokenType operator_type = parser.previous.type;
@@ -476,9 +463,31 @@ static void binary(bool can_assign) {
         case TOKEN_SLASH:
             BINARY_OP_I(OP_DIV);
             break;
+        case TOKEN_EQUAL_EQUAL:
+            COMPARISON_OP(OP_JMP_EQ);
+            break;
+        case TOKEN_BANG_EQUAL:
+            COMPARISON_OP(OP_JMP_NEQ);
+            break;
+        case TOKEN_GREATER:
+            COMPARISON_OP(OP_JMP_GT);
+            break;
+        case TOKEN_LESS:
+            COMPARISON_OP(OP_JMP_LT);
+            break;
+        case TOKEN_GREATER_EQUAL:
+            COMPARISON_OP(OP_JMP_GTE);
+            break;
+        case TOKEN_LESS_EQUAL:
+            COMPARISON_OP(OP_JMP_LTE);
+            break;
         default:
-            return;
+            error("Unknown token");
+            break;
     }
+
+    free_register(reg1);
+    free_register(reg2);
 
 #undef BINARY_OP_I
 }
@@ -486,37 +495,17 @@ static void binary(bool can_assign) {
 static void literal(bool can_assign) {
     UNUSED(can_assign);
 
-    int ret = alloc_register();
-
-    if (ret < 0) {
-        error_alloc_register();
-        return;
-    }
-
-    uint8_t reg = (uint8_t) ret;
-
     switch (parser.previous.type) {
         case TOKEN_FALSE:
-            emit_opcode(OP_LETI);
-            emit_register(reg);
-            emit_dword(CONSTANT_FALSE);
-
-            emit_opcode(OP_STACK_PUSH);
-            emit_register(reg);
+            emit_stack_push_value(CONSTANT_FALSE);
             break;
         case TOKEN_TRUE:
-            emit_opcode(OP_LETI);
-            emit_register(reg);
-            emit_dword(CONSTANT_TRUE);
-
-            emit_opcode(OP_STACK_PUSH);
-            emit_register(reg);
+            emit_stack_push_value(CONSTANT_TRUE);
             break;
         default:
-            return;
+            error("Unknown literal token");
+            break;
     }
-
-    free_register(reg);
 }
 
 static void named_variable(Token name, bool can_assign) {
@@ -527,14 +516,9 @@ static void named_variable(Token name, bool can_assign) {
 
     if (can_assign && match(TOKEN_EQUAL)) {
         expression();
-        emit_opcode(OP_STACK_POP);
-        emit_register(local->reg);
-
-        emit_opcode(OP_STACK_PUSH);
-        emit_register(local->reg);
+        emit_stack_peek(local->reg);
     } else {
-        emit_opcode(OP_STACK_PUSH);
-        emit_register(local->reg);
+        emit_stack_push(local->reg);
     }
 }
 
@@ -554,19 +538,7 @@ static void number_integer(bool can_assign) {
 
     int32_t value = (int32_t) strtol(parser.previous.start, NULL, 10);
 
-    int ret = alloc_register();
-    uint8_t reg = (uint8_t) ret;
-    if (ret < 0) {
-        error_alloc_register();
-    } else {
-        emit_opcode(OP_LETI);
-        emit_register(reg);
-        emit_dword(value);
-        emit_opcode(OP_STACK_PUSH);
-        emit_register(reg);
-
-        free_register(reg);
-    }
+    emit_stack_push_value(value);
 }
 
 static void and_(bool can_assign) {
@@ -582,13 +554,9 @@ static void and_(bool can_assign) {
     uint8_t reg = (uint8_t) ret;
     size_t label = take_label();
 
-    emit_opcode(OP_STACK_POP);
-    emit_register(reg);
+    emit_stack_pop(reg);
 
-    emit_opcode(OP_JMPI_EQ);
-    emit_register(reg);
-    emit_dword(CONSTANT_FALSE);
-    emit_word(label);
+    emit_conditional_jump_ri(OP_JMPI_EQ, reg, CONSTANT_FALSE, label);
 
     parse_precedence(PREC_AND);
 
@@ -610,19 +578,11 @@ static void or_(bool can_assign) {
     uint8_t reg = (uint8_t) ret;
     size_t label = take_label();
 
-    emit_opcode(OP_STACK_POP);
-    emit_register(reg);
+    emit_stack_peek(reg);
 
-    emit_opcode(OP_STACK_PUSH);
-    emit_register(reg);
+    emit_conditional_jump_ri(OP_JMPI_NEQ, reg, CONSTANT_FALSE, label);
 
-    emit_opcode(OP_JMPI_NEQ);
-    emit_register(reg);
-    emit_dword(CONSTANT_FALSE);
-    emit_word(label);
-
-    emit_opcode(OP_STACK_POP);
-    emit_register(reg);
+    emit_stack_pop(reg);
 
     parse_precedence(PREC_OR);
 
@@ -646,16 +606,13 @@ static void unary(bool can_assign) {
             if (ret < 0) {
                 error_alloc_register();
             } else {
-                emit_opcode(OP_STACK_POP);
-                emit_register(reg);
+                emit_stack_pop(reg);
                 emit_opcode(OP_REV);
                 emit_register(reg);
-                emit_opcode(OP_STACK_PUSH);
-                emit_register(reg);
+                emit_stack_push(reg);
 
                 free_register(reg);
             }
-            emit_opcode(OP_REV);
             break;
         }
         case TOKEN_MINUS: {
@@ -665,13 +622,11 @@ static void unary(bool can_assign) {
             if (ret < 0) {
                 error_alloc_register();
             } else {
-                emit_opcode(OP_STACK_POP);
-                emit_register(reg);
+                emit_stack_pop(reg);
                 emit_opcode(OP_MULI);
                 emit_register(reg);
                 emit_dword(-1);
-                emit_opcode(OP_STACK_PUSH);
-                emit_register(reg);
+                emit_stack_push(reg);
 
                 free_register(reg);
             }
@@ -816,23 +771,7 @@ static void let_declaration(void) {
     if (match(TOKEN_EQUAL)) {
         expression();
     } else {
-        int ret2 = alloc_register();
-
-        if (ret < 0) {
-            error_alloc_register();
-            return;
-        } else {
-            uint8_t reg2 = (uint8_t) ret2;
-
-            emit_opcode(OP_LETI);
-            emit_register(reg2);
-            emit_dword(0);
-
-            emit_opcode(OP_STACK_PUSH);
-            emit_register(reg2);
-
-            free_register(reg2);
-        }
+        emit_stack_push_value(0);
     }
 
     consume(TOKEN_SEMICOLON, "Expected ';' after variable declaration");
@@ -849,8 +788,7 @@ static void expression_statement(void) {
         error_alloc_register();
     } else {
         uint8_t reg = (uint8_t) ret;
-        emit_opcode(OP_STACK_POP);
-        emit_register(reg);
+        emit_stack_pop(reg);
 
         free_register(reg);
     }
@@ -885,38 +823,30 @@ static void for_statement(void) {
         expression();
         consume(TOKEN_SEMICOLON, "Expected ';' after condition");
 
-        emit_opcode(OP_STACK_POP);
-        emit_register(reg);
+        emit_stack_pop(reg);
 
-        emit_opcode(OP_JMPI_EQ);
-        emit_register(reg);
-        emit_dword(CONSTANT_FALSE);
-        emit_word(exit_label);
+        emit_conditional_jump_ri(OP_JMPI_NEQ, reg, CONSTANT_FALSE, exit_label);
     }
 
     if (!match(TOKEN_RIGHT_PAREN)) {
         size_t body_label = take_label();
-        emit_opcode(OP_JMP);
-        emit_word(body_label);
+        emit_jump(body_label);
 
         size_t orig_start_label = start_label;
         start_label = put_label_here();
 
         expression();
-        emit_opcode(OP_STACK_POP);
-        emit_register(reg);
+        emit_stack_pop(reg);
         consume(TOKEN_RIGHT_PAREN, "Expected ')' after for clauses");
 
-        emit_opcode(OP_JMP);
-        emit_word(orig_start_label);
+        emit_jump(orig_start_label);
 
         set_label_here(body_label);
     }
 
     statement();
 
-    emit_opcode(OP_JMP);
-    emit_word(start_label);
+    emit_jump(start_label);
 
     set_label_here(exit_label);
 
@@ -940,21 +870,16 @@ static void if_statement(void) {
     uint8_t reg = (uint8_t) ret;
     size_t else_label = take_label();
 
-    emit_opcode(OP_STACK_POP);
-    emit_register(reg);
+    emit_stack_pop(reg);
 
-    emit_opcode(OP_JMPI_EQ);
-    emit_register(reg);
-    emit_dword(CONSTANT_FALSE);
-    emit_word((int16_t) else_label);
+    emit_conditional_jump_ri(OP_JMPI_EQ, reg, CONSTANT_FALSE, else_label);
 
     statement();
 
     if (match(TOKEN_ELSE)) {
         size_t else_end_label = take_label();
 
-        emit_opcode(OP_JMP);
-        emit_word((int16_t) else_end_label);
+        emit_jump(else_end_label);
 
         set_label_here(else_label);
 
@@ -978,8 +903,7 @@ static void print_statement(void) {
     } else {
         uint8_t reg = (uint8_t) ret;
 
-        emit_opcode(OP_STACK_POP);
-        emit_register(reg);
+        emit_stack_pop(reg);
 
         char reg_str[3];
         size_t reg_str_len = 1;
@@ -1038,18 +962,13 @@ static void while_statement(void) {
     uint8_t reg = (uint8_t) ret;
     size_t exit_label = take_label();
 
-    emit_opcode(OP_STACK_POP);
-    emit_register(reg);
+    emit_stack_pop(reg);
 
-    emit_opcode(OP_JMPI_EQ);
-    emit_register(reg);
-    emit_dword(CONSTANT_FALSE);
-    emit_word(exit_label);
+    emit_conditional_jump_ri(OP_JMPI_EQ, reg, CONSTANT_FALSE, exit_label);
 
     statement();
 
-    emit_opcode(OP_JMP);
-    emit_word(start_label);
+    emit_jump(start_label);
 
     set_label_here(exit_label);
 
@@ -1125,6 +1044,8 @@ bool compile(const char* source, Chunk* chunk) {
     for (size_t i = 1; i < NUM_REGISTERS; i++) {
         parser.free_registers[i] = true;
     }
+
+    emit_runtime();
 
     advance();
     
