@@ -5,4 +5,6 @@
 
 bool compile(const char* source, Chunk* chunk);
 
+extern size_t entry_point_label;
+
 #endif

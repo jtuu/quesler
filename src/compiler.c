@@ -7,18 +7,31 @@
 #include "opcodes.h"
 #include "value.h"
 #include "object.h"
+#include "memory.h"
 
 #ifdef DEBUG
 #include "debug.h"
 #endif
 
 typedef struct {
+    Token name;
+    size_t label;
+    size_t arity;
+} Function;
+
+typedef struct {
     Token current;
     Token previous;
+    Token previous2;
     bool had_error;
     bool panic_mode;
     bool free_registers[NUM_REGISTERS];
     size_t labels_count;
+    bool entry_function_exists;
+    Function** functions;
+    size_t functions_count;
+    size_t functions_capacity;
+    size_t current_function_label;
 } Parser;
 
 typedef enum {
@@ -46,6 +59,8 @@ typedef struct {
 typedef struct {
     Token name;
     int depth;
+    bool defined;
+    bool allocated;
     uint8_t reg;
 } Local;
 
@@ -67,8 +82,9 @@ static void declaration(void);
 static ParseRule* get_rule(TokenType type);
 static void parse_precedence(Precedence precedence);
 
-uint8_t return_register = 1;
 size_t entry_point_label = 0;
+char* entry_function_name = "main";
+size_t entry_function_name_len = 4;
 
 static bool identifiers_equal(Token* a, Token* b) {
     if (a->length != b->length) {
@@ -183,15 +199,16 @@ static Local* resolve_local(Compiler* compiler, Token* name) {
     return NULL;
 }
 
-static void mark_initialized(void) {
+static void mark_initialized(Local* local) {
     if (current->scope_depth == 0) {
         return;
     }
 
-    current->locals[current->local_count - 1].depth = current->scope_depth;
+    local->depth = current->scope_depth;
 }
 
 static void advance(void) {
+    parser.previous2 = parser.previous;
     parser.previous = parser.current;
 
     while (true) {
@@ -266,8 +283,6 @@ static void emit_string(uint16_t* str) {
 }
 
 static void end_compiler(void) {
-    emit_opcode(OP_RET);
-
 #ifdef DEBUG
     disassemble_chunk(current_chunk(), "program");
 #endif
@@ -296,6 +311,35 @@ static void emit_stack_peek(uint8_t reg) {
     emit_stack_push(reg);
 }
 
+static void emit_stack_swap() {
+    int ret = alloc_register();
+
+    if (ret < 0) {
+        error_alloc_register();
+        return;
+    }
+
+    uint8_t reg1 = (uint8_t) ret;
+
+    ret = alloc_register();
+
+    if (ret < 0) {
+        free_register(reg1);
+        error_alloc_register();
+        return;
+    }
+
+    uint8_t reg2 = (uint8_t) ret;
+
+    emit_stack_pop(reg1);
+    emit_stack_pop(reg2);
+    emit_stack_push(reg1);
+    emit_stack_push(reg2);
+
+    free_register(reg1);
+    free_register(reg2);
+}
+
 static void emit_stack_push_value(int32_t val) {
     int ret = alloc_register();
 
@@ -310,11 +354,6 @@ static void emit_stack_push_value(int32_t val) {
     emit_stack_push(reg);
 
     free_register(reg);
-}
-
-static void emit_return_with_value(int32_t val) {
-    emit_leti(return_register, val);
-    emit_opcode(OP_RET);
 }
 
 static void emit_call(size_t label) {
@@ -342,10 +381,8 @@ static void emit_conditional_jump_ri(uint16_t opcode, uint8_t reg, int32_t val, 
 }
 
 static void emit_runtime(void) {
-    parser.free_registers[return_register] = false;
-
-    // End of runtime, beginning of user's code
-    set_label_here(entry_point_label);
+    // Reserved registers
+    parser.free_registers[0] = false;
 }
 
 static void begin_scope(void) {
@@ -364,7 +401,6 @@ static void end_scope(void) {
         while (current->local_count > 0 &&
             current->locals[current->local_count - 1].depth >
                 current->scope_depth) {
-            free_register(current->locals[current->local_count - 1].reg);
 
             current->local_count--;
         }
@@ -379,15 +415,41 @@ static void init_compiler(Compiler* compiler) {
     current = compiler;
 }
 
-static void define_variable(uint8_t reg) {
+static void define_function(Function* func) {
+    if (parser.functions_capacity < parser.functions_count + 1) {
+        size_t old_capacity = parser.functions_capacity;
+        parser.functions_capacity = GROW_CAPACITY(old_capacity);
+        parser.functions = GROW_ARRAY(Function*, parser.functions,
+            old_capacity, parser.functions_capacity);
+    }
+
+    parser.functions[parser.functions_count] = func;
+    parser.functions_count++;
+}
+
+static void define_variable(uint8_t reg, Local* local) {
     if (current->scope_depth > 0) {
-        current->locals[current->local_count - 1].reg = reg;
-
-        mark_initialized();
-
+        local->allocated = true;
+        local->reg = reg;
+        mark_initialized(local);
         emit_stack_pop(reg);
         return;
     }
+}
+
+static size_t argument_list(void) {
+    size_t arg_count = 0;
+
+    if (!check(TOKEN_RIGHT_PAREN)) {
+        do {
+            expression();
+            arg_count++;
+        } while (match(TOKEN_COMMA));
+    }
+
+    consume(TOKEN_RIGHT_PAREN, "Expected ')' after function call arguments");
+
+    return arg_count;
 }
 
 static void binary(bool can_assign) {
@@ -492,6 +554,44 @@ static void binary(bool can_assign) {
 #undef BINARY_OP_I
 }
 
+static Function* resolve_function(Token* name) {
+    for (size_t i = 0; i < parser.functions_count; i++) {
+        if (parser.functions[i]->name.length == name->length) {
+            if (!strncmp(parser.functions[i]->name.start, name->start, name->length)) {
+                return parser.functions[i];
+            }
+        }
+    }
+
+    return NULL;
+}
+
+static void save_locals() {
+
+}
+
+static void call(bool can_assign) {
+    UNUSED(can_assign);
+
+    Function* func = resolve_function(&parser.previous2);
+    if (func == NULL) {
+        error("Call target is not a function");
+        return;
+    }
+
+    size_t arg_count = argument_list();
+
+    if (arg_count > func->arity) {
+        error("Too many arguments");
+        return;
+    } else if (arg_count < func->arity) {
+        error("Not enough arguments");
+        return;
+    }
+
+    emit_call(func->label);
+}
+
 static void literal(bool can_assign) {
     UNUSED(can_assign);
 
@@ -511,14 +611,20 @@ static void literal(bool can_assign) {
 static void named_variable(Token name, bool can_assign) {
     Local* local = resolve_local(current, &name);
     if (local == NULL) {
-        error("Could not resolve variable");
-    }
+        Function* function = resolve_function(&name);
 
-    if (can_assign && match(TOKEN_EQUAL)) {
-        expression();
-        emit_stack_peek(local->reg);
+        if (function == NULL) {
+            error("Could not resolve variable");
+        }
     } else {
-        emit_stack_push(local->reg);
+        if (can_assign && match(TOKEN_EQUAL)) {
+            // Variable write
+            expression();
+            emit_stack_peek(local->reg);
+        } else if (local->depth != -1) {
+            // Variable read
+            emit_stack_push(local->reg);
+        }
     }
 }
 
@@ -638,7 +744,7 @@ static void unary(bool can_assign) {
 }
 
 ParseRule rules[] = {
-  [TOKEN_LEFT_PAREN]    = {grouping,       NULL,   PREC_NONE},
+  [TOKEN_LEFT_PAREN]    = {grouping,       call,   PREC_CALL},
   [TOKEN_RIGHT_PAREN]   = {NULL,           NULL,   PREC_NONE},
   [TOKEN_LEFT_BRACE]    = {NULL,           NULL,   PREC_NONE}, 
   [TOKEN_RIGHT_BRACE]   = {NULL,           NULL,   PREC_NONE},
@@ -699,7 +805,7 @@ static void parse_precedence(Precedence precedence) {
     }
 }
 
-static void add_local(Token name) {
+static Local* add_local(Token name) {
     if (current->local_count >= UINT8_COUNT) {
         error("Too many local variable in scope");
         return;
@@ -708,7 +814,11 @@ static void add_local(Token name) {
     Local* local = &current->locals[current->local_count++];
     local->name = name;
     local->depth = -1;
+    local->defined = false;
+    local->allocated = false;
     local->reg = 0;
+
+    return local;
 }
 
 static void declare_variable(void) {
@@ -717,6 +827,9 @@ static void declare_variable(void) {
     }
 
     Token* name = &parser.previous;
+
+    for ()
+
     for (int i = (int) current->local_count - 1; i >= 0; i--) {
         Local* local = &current->locals[i];
         if (local->depth != -1 && local->depth < current->scope_depth) {
@@ -731,15 +844,13 @@ static void declare_variable(void) {
     add_local(*name);
 }
 
-static int parse_variable(const char* error) {
+static Local* parse_variable(const char* error) {
     consume(TOKEN_IDENTIFIER, error);
 
     declare_variable();
     if (current->scope_depth > 0) {
         return alloc_register();
     }
-
-    return identifier_constant(&parser.previous);
 }
 
 static ParseRule* get_rule(TokenType type) {
@@ -756,6 +867,55 @@ static void block(void) {
     }
 
     consume(TOKEN_RIGHT_BRACE, "Expected '}' after block");
+}
+
+static Function* function(void) {
+    begin_scope();
+
+    Function* func = malloc(sizeof(Function));
+    func->name = parser.previous;
+    func->arity = 0;
+
+    define_function(func);
+
+    if (func->name.length == entry_function_name_len && 
+            !strncmp(func->name.start, entry_function_name, entry_function_name_len)) {
+        parser.entry_function_exists = true;
+        func->label = entry_point_label;
+        set_label_here(entry_point_label);
+    } else {
+        func->label = put_label_here();
+    }
+
+    parser.current_function_label = func->label;
+
+    uint8_t param_registers[UINT8_MAX];
+
+    consume(TOKEN_LEFT_PAREN, "Expected '(' after function name");
+    if (!check(TOKEN_RIGHT_PAREN)) {
+        do {
+            param_registers[func->arity++] = (uint8_t) parse_variable("Expected function parameter name");
+        } while (match(TOKEN_COMMA));
+    }
+    consume(TOKEN_RIGHT_PAREN, "Expected ')' after function parameters");
+
+    consume(TOKEN_LEFT_BRACE, "Expected '{' before function body");
+
+    for (size_t i = func->arity; i != 0; i--) {
+        define_variable(param_registers[i - 1], &current->locals[current->local_count - (func->arity - i) - 1]);
+    }
+
+    block();
+
+    end_scope();
+
+    return func;
+}
+
+static void function_declaration(void) {
+    consume(TOKEN_IDENTIFIER, "Expected function name");
+
+    function();
 }
 
 static void let_declaration(void) {
@@ -776,7 +936,7 @@ static void let_declaration(void) {
 
     consume(TOKEN_SEMICOLON, "Expected ';' after variable declaration");
 
-    define_variable(reg);
+    define_variable(reg, );
 }
 
 static void expression_statement(void) {
@@ -945,6 +1105,27 @@ static void print_statement(void) {
     }
 }
 
+static void return_statement(void) {
+    if (match(TOKEN_SEMICOLON)) {
+        emit_stack_push_value(0);
+
+        if (parser.current_function_label != entry_point_label) {
+            emit_stack_swap();
+        }
+
+        emit_opcode(OP_RET);
+    } else {
+        expression();
+        consume(TOKEN_SEMICOLON, "Expected ';' after return value");
+
+        if (parser.current_function_label != entry_point_label) {
+            emit_stack_swap();
+        }
+
+        emit_opcode(OP_RET);
+    }
+}
+
 static void while_statement(void) {
     size_t start_label = put_label_here();
 
@@ -1001,7 +1182,9 @@ static void synchronize(void) {
 }
 
 static void declaration(void) {
-    if (match(TOKEN_LET)) {
+    if (match(TOKEN_FUNCTION)) {
+        function_declaration();
+    } else if (match(TOKEN_LET)) {
         let_declaration();
     } else {
         statement();
@@ -1017,6 +1200,8 @@ static void statement(void) {
         print_statement();
     } else if (match(TOKEN_IF)) {
         if_statement();
+    } else if (match(TOKEN_RETURN)) {
+        return_statement();
     } else if (match(TOKEN_FOR)) {
         for_statement();
     } else if (match(TOKEN_WHILE)) {
@@ -1039,6 +1224,10 @@ bool compile(const char* source, Chunk* chunk) {
 
     parser.had_error = false;
     parser.panic_mode = false;
+    parser.entry_function_exists = false;
+    parser.functions = NULL;
+    parser.functions_count = 0;
+    parser.functions_capacity = 0;
     
     parser.free_registers[0] = false;
     for (size_t i = 1; i < NUM_REGISTERS; i++) {
@@ -1054,6 +1243,10 @@ bool compile(const char* source, Chunk* chunk) {
     }
 
     end_compiler();
+
+    if (!parser.entry_function_exists) {
+        error("Missing entry function");
+    }
 
     return !parser.had_error;
 }

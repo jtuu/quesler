@@ -55,6 +55,10 @@ Value stack_pop() {
     return *vm.stack_top;
 }
 
+static bool stack_empty(void) {
+    return vm.stack_top == vm.stack;
+}
+
 static void arg_stack_push(Value value) {
     *vm.arg_stack_top = value;
     vm.arg_stack_top++;
@@ -267,8 +271,14 @@ static InterpretResult run(void) {
         }
 
         switch (opcode) {
-            case OP_RET: 
-                return INTERPRET_OK;
+            case OP_RET: {
+                    int32_t ret_addr = AS_DWORD(stack_pop());
+                    vm.ip = vm.chunk->code + ret_addr;
+                    if (stack_empty()) {
+                        return INTERPRET_OK;
+                    }
+                    break;
+                }
             case OP_ARG_PUSHS: {
                     uint16_t* str_start = (uint16_t*) vm.ip;
                     uint16_t* str_end = (uint16_t*)  vm.ip;
@@ -297,15 +307,21 @@ static InterpretResult run(void) {
                 }
                 break;
             }
-            case OP_JMP: {
+            case OP_CALL: {
                 size_t label = (size_t) READ2();
                 int32_t offset = vm.chunk->labels[label];
 
                 if (offset < 0) {
-                    fprintf(stderr, "VM: Invalid jump target\n");
+                    fprintf(stderr, "VM: Invalid call target\n");
                 } else {
+                    stack_push(DWORD_VAL((int32_t) (vm.ip - vm.chunk->code)));
                     vm.ip = vm.chunk->code + offset;
                 }
+                break;
+            }
+            case OP_JMP: {
+                size_t label = (size_t) READ2();
+                do_jump(label);
                 break;
             }
             case OP_JMP_EQ:  __attribute__ ((fallthrough));
@@ -394,7 +410,7 @@ static InterpretResult run(void) {
 
 InterpretResult interpret_bytecode(Chunk* chunk) {
     vm.chunk = chunk;
-    vm.ip = vm.chunk->code;
+    vm.ip = vm.chunk->code + vm.chunk->labels[entry_point_label];
 
     InterpretResult result = run();
 
