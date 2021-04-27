@@ -16,6 +16,13 @@ void disassemble_chunk(Chunk* chunk, const char* name) {
                     (buf)[1] << 8 | (buf)[0])
 
 size_t disassemble_instruction(Chunk* chunk, size_t offset) {
+    for (size_t i = 0; i < chunk->labels_count; i++) {
+        if (chunk->labels[i] == (int32_t) offset) {
+            printf("%ld:\n", i);
+            break;
+        }
+    }
+
     printf("%04ld ", offset);
 
     if (offset > 0 && chunk->lines[offset] == chunk->lines[offset - 1]) {
@@ -72,10 +79,12 @@ size_t disassemble_instruction(Chunk* chunk, size_t offset) {
                     uint16_t* str_start = (uint16_t*) arg;
                     uint16_t* str_end = (uint16_t*) arg;
                     
+                    printf("\"");
                     while (*str_end != 0) {
                         printf("%lc", (wchar_t) *str_end);
                         str_end++;
                     }
+                    printf("\"");
 
                     size_t str_size = (size_t) (str_end - str_start + 1) * 2;
                     args_size += str_size;

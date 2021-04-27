@@ -57,7 +57,7 @@ void set_chunk_label_offset(Chunk* chunk, size_t label, int32_t offset) {
 
     chunk->labels[label] = offset;
 
-    if (chunk->labels_count < label) {
+    if (chunk->labels_count <= label) {
         chunk->labels_count = label + 1;
     }
 }
