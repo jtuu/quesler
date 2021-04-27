@@ -1304,3 +1304,55 @@ bool compile(const char* source, Chunk* chunk) {
 
     return !parser.had_error;
 }
+
+#ifdef STANDALONE_COMPILER
+int main(int argc, const char* argv[]) {
+    int ret = 0;
+
+    size_t* input_file_indices = malloc((size_t) (argc - 1) * sizeof(size_t));
+    size_t num_input_files = 0;
+
+    const char* option_output_file = "-o";
+    bool expect_option_output_file = false;
+    const char* output_filename = "./a.out";
+
+    for (size_t i = 1; i < (size_t) argc; i++) {
+        if (expect_option_output_file) {
+            expect_option_output_file = false;
+
+            output_filename = argv[i];
+        } else if (strcmp(argv[i], option_output_file) == 0) {
+            expect_option_output_file = true;
+        } else {
+            input_file_indices[num_input_files++] = i;
+        }
+    }
+
+    if (expect_option_output_file) {
+        fprintf(stderr, "error: missing filename after \"%s\"\n", option_output_file);
+        ret = 1;
+        goto end;
+    }
+
+    char* source = NULL;
+    size_t read_size = 0;
+    for (size_t i = 0; i < num_input_files; i++) {
+        read_size += read_file_ex(argv[input_file_indices[i]], (uint8_t**) &source, read_size, read_size, false);
+    }
+
+    Chunk chunk;
+    init_chunk(&chunk);
+
+    if (!compile(source, &chunk)) {
+        free_chunk(&chunk);
+        ret = 1;
+        goto end;
+    }
+
+    write_file(output_filename, chunk.code, chunk.count, true);
+
+end:
+    free(input_file_indices);
+    return ret;
+}
+#endif

@@ -1,3 +1,5 @@
+#ifdef STANDALONE_INTERPRETER
+
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -20,24 +22,6 @@ static void repl(void) {
 
         interpret_source(line);
     }
-}
-
-static void read_file(const char* path, uint8_t** file_buf, bool binary) {
-    FILE* fd = fopen(path, binary ? "rb" : "r");
-    if (fd == NULL) {
-        fprintf(stderr, "Failed to open file\n");
-        return;
-    }
-
-    size_t read_target_size = 0x1000;
-    size_t buf_size = read_target_size;
-    size_t read_size = 0;
-
-    do {
-        *file_buf = realloc(*file_buf, buf_size);
-        read_size = fread(*file_buf, read_target_size, 1, fd);
-        buf_size += read_target_size;
-    } while (read_size == read_target_size);
 }
 
 static InterpretResult run_source_file(const char* path) {
@@ -105,3 +89,5 @@ int main(int argc, const char* argv[]) {
     free_vm();
     return ret;
 }
+
+#endif
