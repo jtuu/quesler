@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include "common.h"
+#include "chunk.h"
 
 typedef struct {
     uint32_t object_code_offset;
@@ -16,13 +17,23 @@ typedef struct {
     uint16_t long_description[288];
     uint32_t padding;
     uint32_t items_list[932];
-    unsigned int object_code_len;
+    size_t object_code_len;
     uint8_t *object_code;
-    unsigned int function_offset_table_len;
+    size_t function_offset_table_len;
     int32_t *function_offset_table;
 } QstBin;
 
 int write_bin(FILE* fd, QstBin* bin);
+
+QstBin* create_bin(
+    uint32_t quest_number,
+    uint32_t language,
+    char* quest_name,
+    char* short_description,
+    char* long_description);
+
+void chunk_to_bin(Chunk* chunk, QstBin* bin);
+
 void free_bin(QstBin* bin);
 
 #endif

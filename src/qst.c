@@ -2,6 +2,9 @@
 #include <string.h>
 #include <stdlib.h>
 #include "qst.h"
+#include "chunk.h"
+
+#define BIN_MINIMUM_SIZE 4652
 
 int write_bin(FILE* fd, QstBin* bin) {
     size_t write_size = 0;
@@ -17,9 +20,9 @@ int write_bin(FILE* fd, QstBin* bin) {
     } while (false)
 #define WRITE4(value) CHECKED_WRITE(value, 4, 1)
 
-    bin->object_code_offset = 4652;
-    bin->function_offset_table_offset = bin->object_code_offset +
-                                        bin->object_code_len;
+    bin->object_code_offset = BIN_MINIMUM_SIZE;
+    bin->function_offset_table_offset = (uint32_t) (bin->object_code_offset +
+                                                    bin->object_code_len);
     bin->xffffffff = 0xffffffff;
     bin->padding = 0;
 
@@ -44,6 +47,46 @@ int write_bin(FILE* fd, QstBin* bin) {
 
 #undef CHECKED_WRITE
 #undef WRITE4
+}
+
+static void copy_to_wide_string(uint16_t* dst, char* src, size_t len) {
+    size_t n = 0;
+    while (*src != '\0' && n < len) {
+        dst[n * 2] = (uint16_t) *src;
+        n++;
+        src++;
+    }
+}
+
+QstBin* create_bin(
+    uint32_t quest_number,
+    uint32_t language,
+    char* quest_name,
+    char* short_description,
+    char* long_description) {
+
+    QstBin* bin = calloc(1, sizeof(QstBin));
+
+    bin->quest_number = quest_number;
+    bin->language = language;
+
+    copy_to_wide_string(bin->quest_name, quest_name, 32);
+    copy_to_wide_string(bin->short_description, short_description, 128);
+    copy_to_wide_string(bin->long_description, long_description, 288);
+
+    return bin;
+}
+
+void chunk_to_bin(Chunk* chunk, QstBin* bin) {
+    bin->object_code_len = chunk->count;
+    bin->object_code = malloc(bin->object_code_len);
+    memcpy(bin->object_code, chunk->code, bin->object_code_len);
+
+    bin->function_offset_table_len = chunk->labels_count;
+    bin->function_offset_table = malloc(bin->function_offset_table_len);
+    memcpy(bin->function_offset_table, chunk->labels, bin->function_offset_table_len);
+
+    bin->bin_size = (uint32_t) (BIN_MINIMUM_SIZE + bin->object_code_len + bin->function_offset_table_len);
 }
 
 void free_bin(QstBin* bin) {

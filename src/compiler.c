@@ -8,6 +8,7 @@
 #include "value.h"
 #include "object.h"
 #include "memory.h"
+#include "qst.h"
 
 #ifdef DEBUG
 #include "debug.h"
@@ -1305,31 +1306,90 @@ bool compile(const char* source, Chunk* chunk) {
     return !parser.had_error;
 }
 
+typedef struct {
+    const char* name;
+    const char* option;
+    const char* value;
+} ArgOption;
+
+const ArgOption option_output_file = {
+        .name = "output file",
+        .option = "-o",
+        .value = "./a.out"
+};
+const ArgOption option_quest_number = {
+        .name = "quest number",
+        .option = "--number",
+        .value = "0"
+};
+const ArgOption option_quest_language = {
+        .name = "quest language",
+        .option = "--language",
+        .value = "0"
+};
+const ArgOption option_quest_name = {
+        .name = "quest name",
+        .option = "--name",
+        .value = "Untitled quest"
+};
+const ArgOption option_short_description = {
+        .name = "short description",
+        .option = "--short-description",
+        .value = "Short description"
+};
+const ArgOption option_long_description = {
+        .name = "long description",
+        .option = "--long-description",
+        .value = "Long description"
+};
+
+#define NUM_OPTS 6
+ArgOption options[NUM_OPTS] = {
+    option_output_file,
+    option_quest_number,
+    option_quest_language,
+    option_quest_name,
+    option_short_description,
+    option_long_description
+};
+
 #ifdef STANDALONE_COMPILER
 int main(int argc, const char* argv[]) {
     int ret = 0;
 
-    size_t* input_file_indices = malloc((size_t) (argc - 1) * sizeof(size_t));
+    size_t* input_file_indices = malloc(argc * sizeof(size_t));
     size_t num_input_files = 0;
 
-    const char* option_output_file = "-o";
-    bool expect_option_output_file = false;
-    const char* output_filename = "./a.out";
+    ArgOption* expecting_opt = NULL;
 
     for (size_t i = 1; i < (size_t) argc; i++) {
-        if (expect_option_output_file) {
-            expect_option_output_file = false;
-
-            output_filename = argv[i];
-        } else if (strcmp(argv[i], option_output_file) == 0) {
-            expect_option_output_file = true;
+        if (expecting_opt != NULL) {
+            expecting_opt->value = argv[i];
+            expecting_opt = NULL;
         } else {
-            input_file_indices[num_input_files++] = i;
+            bool is_opt = false;
+            for (size_t j = 0; j < NUM_OPTS; j++) {
+                if (strcmp(argv[i], options[j].option) == 0) {
+                    expecting_opt = &options[j];
+                    is_opt = true;
+                    break;
+                }
+            }
+
+            if (!is_opt) {
+                input_file_indices[num_input_files++] = i;
+            }
         }
     }
 
-    if (expect_option_output_file) {
-        fprintf(stderr, "error: missing filename after \"%s\"\n", option_output_file);
+    if (expecting_opt != NULL) {
+        fprintf(stderr, "error: missing value for option \"%s\"\n", expecting_opt->name);
+        ret = 1;
+        goto end;
+    }
+
+    if (num_input_files < 1) {
+        fprintf(stderr, "error: no input files specified\n");
         ret = 1;
         goto end;
     }
@@ -1346,10 +1406,36 @@ int main(int argc, const char* argv[]) {
     if (!compile(source, &chunk)) {
         free_chunk(&chunk);
         ret = 1;
-        goto end;
+        goto end1;
     }
 
-    write_file(output_filename, chunk.code, chunk.count, true);
+    long quest_number = strtol(option_quest_number.value, NULL, 10);
+    long quest_language = strtol(option_quest_language.value, NULL, 10);
+
+    QstBin* bin = create_bin(
+        (uint32_t) quest_number,
+        (uint32_t) quest_language,
+        option_quest_name.value,
+        option_short_description.value,
+        option_long_description.value);
+    chunk_to_bin(&chunk, bin);
+
+    FILE *output_file = fopen(option_output_file.value, "wb");
+    if (!output_file) {
+        fprintf(stderr, "error: failed to open output file \"%s\"\n", option_output_file.value);
+        ret = 1;
+        goto end2;
+    }
+
+    write_bin(output_file, bin);
+
+    fclose(output_file);
+
+end2:
+    free_bin(bin);
+
+end1:
+    free(source);
 
 end:
     free(input_file_indices);
