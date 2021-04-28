@@ -42,6 +42,11 @@ void init_vm() {
 void free_vm() {}
 
 void stack_push(Value value) {
+    if (vm.stack_top - vm.stack >= STACK_SIZE) {
+        fprintf(stderr, "VM: Stack overflow\n");
+        return;
+    }
+
     *vm.stack_top = value;
     vm.stack_top++;
 }

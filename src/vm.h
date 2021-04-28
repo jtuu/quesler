@@ -8,7 +8,7 @@
 #define REGISTERS_SIZE NUM_REGISTERS * sizeof(Value)
 
 #define STACK_SIZE 256
-#define STACK_LEN STACK_SIZE / sizeof(Value)
+#define STACK_LEN STACK_SIZE / 4
 
 #define ARG_STACK_LEN 8
 
