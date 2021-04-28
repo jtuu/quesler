@@ -587,6 +587,11 @@ static void call(bool can_assign) {
         return;
     }
 
+    // Save locals
+    for (size_t i = 0; i < current->local_count; i++) {
+        emit_stack_push(current->locals[i].reg);
+    }
+
     size_t arg_count = argument_list();
 
     if (arg_count > func->arity) {
@@ -597,38 +602,9 @@ static void call(bool can_assign) {
         return;
     }
 
-    uint8_t* regs = malloc(arg_count * sizeof(uint8_t));
-
-    for (size_t i = 0; i < arg_count; i++) {
-        int ret = alloc_register();
-
-        if (ret < 0) {
-            error_alloc_register();
-
-            for (int j = (int) i; j >= 0; j--) {
-                free_register(regs[j]);
-            }
-
-            break;
-        }
-
-        regs[i] = (uint8_t) ret;
-        emit_stack_pop(regs[i]);
-    }
-    
-    for (size_t i = 0; i < current->local_count; i++) {
-        emit_stack_push(current->locals[i].reg);
-    }
-
-    for (int i = (int) arg_count - 1; i >= 0; i--) {
-        emit_stack_push(regs[i]);
-        free_register(regs[i]);
-    }
-
-    free(regs);
-
     emit_call(func->label);
 
+    // Restore locals
     for (int i = (int) current->local_count - 1; i >= 0; i--) {
         emit_stack_pop(current->locals[i].reg);
     }
