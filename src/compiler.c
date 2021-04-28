@@ -609,7 +609,7 @@ static void call(bool can_assign) {
         emit_stack_push(current->locals[i].reg);
     }
 
-    for (int i = (int) arg_count; i >= 0; i--) {
+    for (int i = (int) arg_count - 1; i >= 0; i--) {
         emit_stack_push(regs[i]);
         free_register(regs[i]);
     }
@@ -1140,7 +1140,7 @@ static void print_statement(void) {
         size_t str_size = (reg_str_len + 4) * 2;
         uint16_t* str = malloc(str_size);
         str[0] = (uint16_t) '<';
-        str[1] = (uint16_t) 'R';
+        str[1] = (uint16_t) 'r';
 
         for (size_t i = 0; i < reg_str_len; i++) {
             str[2 + i] = (uint16_t) reg_str[3 - reg_str_len + i];
