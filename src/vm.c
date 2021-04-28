@@ -252,7 +252,7 @@ static InterpretResult run(void) {
         }
         printf("\n");
 
-        disassemble_instruction(vm.chunk, (size_t) (vm.ip - vm.chunk->code));
+        disassemble_instruction(vm.chunk, (size_t) (vm.ip - vm.chunk->code), true);
 #endif
         uint16_t opcode = READ1();
         

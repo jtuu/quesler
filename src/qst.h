@@ -25,6 +25,8 @@ typedef struct {
 
 int write_bin(FILE* fd, QstBin* bin);
 
+int read_bin(FILE* fd, QstBin* bin);
+
 QstBin* create_bin(
     uint32_t quest_number,
     uint32_t language,
@@ -33,6 +35,8 @@ QstBin* create_bin(
     char* long_description);
 
 void chunk_to_bin(Chunk* chunk, QstBin* bin);
+
+void bin_to_chunk(QstBin* bin, Chunk* chunk);
 
 void free_bin(QstBin* bin);
 

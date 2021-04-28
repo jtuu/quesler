@@ -11,14 +11,14 @@ int write_bin(FILE* fd, QstBin* bin) {
 
 #define CHECKED_WRITE(value, size, num) \
     do { \
-        size_t ret = fwrite(&(value), size, num, fd); \
+        size_t ret = fwrite(value, size, num, fd); \
         int err = ferror(fd); \
         if (err) { \
             return err; \
         } \
         write_size += ret * (size); \
     } while (false)
-#define WRITE4(value) CHECKED_WRITE(value, 4, 1)
+#define WRITE4(value) CHECKED_WRITE(&(value), 4, 1)
 
     bin->object_code_offset = BIN_MINIMUM_SIZE;
     bin->function_offset_table_offset = (uint32_t) (bin->object_code_offset +
@@ -47,6 +47,45 @@ int write_bin(FILE* fd, QstBin* bin) {
 
 #undef CHECKED_WRITE
 #undef WRITE4
+}
+
+int read_bin(FILE* fd, QstBin* bin) {
+    size_t read_size = 0;
+
+#define CHECKED_READ(dst, size, num) \
+    do { \
+        size_t ret = fread(dst, size, num, fd); \
+        int err = ferror(fd); \
+        if (err) { \
+            return err; \
+        } \
+        read_size += ret * (size); \
+    } while (false)
+
+    CHECKED_READ(&bin->object_code_offset, 4, 1);
+    CHECKED_READ(&bin->function_offset_table_offset, 4, 1);
+    CHECKED_READ(&bin->bin_size, 4, 1);
+    CHECKED_READ(&bin->xffffffff, 4, 1);
+    CHECKED_READ(&bin->quest_number, 4, 1);
+    CHECKED_READ(&bin->language, 4, 1);
+    CHECKED_READ(&bin->quest_name, 64, 1);
+    CHECKED_READ(&bin->short_description, 256, 1);
+    CHECKED_READ(&bin->long_description, 576, 1);
+    CHECKED_READ(&bin->padding, 4, 1);
+    CHECKED_READ(&bin->items_list, 3728, 1);
+
+    bin->object_code_len = bin->function_offset_table_offset - bin->object_code_offset;
+    bin->object_code = malloc(bin->object_code_len);
+    CHECKED_READ(bin->object_code, bin->object_code_len, 1);
+
+    size_t labels_size = bin->bin_size - bin->function_offset_table_offset;
+    bin->function_offset_table_len = labels_size / 4;
+    bin->function_offset_table = malloc(labels_size);
+    CHECKED_READ(bin->function_offset_table, labels_size, 1);
+
+    return (int) read_size;
+
+#undef CHECKED_READ
 }
 
 static void copy_to_wide_string(uint16_t* dst, char* src, size_t len) {
@@ -83,14 +122,23 @@ void chunk_to_bin(Chunk* chunk, QstBin* bin) {
     memcpy(bin->object_code, chunk->code, bin->object_code_len);
 
     bin->function_offset_table_len = chunk->labels_count;
-    bin->function_offset_table = malloc(bin->function_offset_table_len);
-    memcpy(bin->function_offset_table, chunk->labels, bin->function_offset_table_len);
+    bin->function_offset_table = malloc(bin->function_offset_table_len * 4);
+    memcpy(bin->function_offset_table, chunk->labels, bin->function_offset_table_len * 4);
 
-    bin->bin_size = (uint32_t) (BIN_MINIMUM_SIZE + bin->object_code_len + bin->function_offset_table_len);
+    bin->bin_size = (uint32_t) (BIN_MINIMUM_SIZE + bin->object_code_len + bin->function_offset_table_len * 4);
+}
+
+void bin_to_chunk(QstBin* bin, Chunk* chunk) {
+    chunk->count = bin->object_code_len;
+    chunk->code = malloc(chunk->count);
+    memcpy(chunk->code, bin->object_code, chunk->count);
+
+    chunk->labels_count = bin->function_offset_table_len;
+    chunk->labels = malloc(chunk->labels_count * 4);
+    memcpy(chunk->labels, bin->function_offset_table, chunk->labels_count * 4);
 }
 
 void free_bin(QstBin* bin) {
     free(bin->object_code);
     free(bin->function_offset_table);
-    free(bin);
 }

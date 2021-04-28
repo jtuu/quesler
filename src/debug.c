@@ -3,11 +3,11 @@
 #include "value.h"
 #include "opcodes.h"
 
-void disassemble_chunk(Chunk* chunk, const char* name) {
+void disassemble_chunk(Chunk* chunk, const char* name, bool line_info) {
     printf("== %s==\n", name);
 
     for (size_t offset = 0; offset < chunk->count;) {
-        offset = disassemble_instruction(chunk, offset);
+        offset = disassemble_instruction(chunk, offset, line_info);
     }
 }
 
@@ -15,7 +15,7 @@ void disassemble_chunk(Chunk* chunk, const char* name) {
 #define READ4(buf) ((buf)[3] << 24 | (buf)[2] << 16 | \
                     (buf)[1] << 8 | (buf)[0])
 
-size_t disassemble_instruction(Chunk* chunk, size_t offset) {
+size_t disassemble_instruction(Chunk* chunk, size_t offset, bool line_info) {
     for (size_t i = 0; i < chunk->labels_count; i++) {
         if (chunk->labels[i] == (int32_t) offset) {
             printf("%ld:\n", i);
@@ -23,12 +23,16 @@ size_t disassemble_instruction(Chunk* chunk, size_t offset) {
         }
     }
 
-    printf("%04ld ", offset);
+    if (line_info) {
+        printf("%04ld ", offset);
 
-    if (offset > 0 && chunk->lines[offset] == chunk->lines[offset - 1]) {
-        printf("   | ");
+        if (offset > 0 && chunk->lines[offset] == chunk->lines[offset - 1]) {
+            printf("   | ");
+        } else {
+            printf("%4ld ", chunk->lines[offset]);
+        }
     } else {
-        printf("%4ld ", chunk->lines[offset]);
+        printf("    ");
     }
 
     size_t opcode_size = 1;

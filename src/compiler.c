@@ -285,7 +285,7 @@ static void emit_string(uint16_t* str) {
 
 static void end_compiler(void) {
 #ifdef DEBUG
-    disassemble_chunk(current_chunk(), "program");
+    disassemble_chunk(current_chunk(), "program", true);
 #endif
 }
 
