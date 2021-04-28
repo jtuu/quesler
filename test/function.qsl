@@ -3,10 +3,8 @@ function foo(n, m) {
         print n;
         foo(n + 1, m);
     }
-    return;
 }
 
 function main() {
     foo(0, 10);
-    return;
 }

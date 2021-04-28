@@ -386,6 +386,17 @@ static void emit_runtime(void) {
     parser.free_registers[0] = false;
 }
 
+static void emit_void_return(void) {
+    emit_stack_push_value(0);
+
+    if (parser.current_function_label != entry_point_label) {
+        emit_stack_swap();
+    }
+
+    emit_opcode(OP_RET);
+}
+
+
 static void begin_scope(void) {
     current->scope_depth++;
 }
@@ -618,7 +629,7 @@ static void call(bool can_assign) {
 
     emit_call(func->label);
 
-    for (int i = (int) current->local_count; i >= 0; i--) {
+    for (int i = (int) current->local_count - 1; i >= 0; i--) {
         emit_stack_pop(current->locals[i].reg);
     }
 }
@@ -961,6 +972,13 @@ static Function* function(void) {
 
     block();
 
+    // implicit return
+    if (is_entry_function) {
+        emit_opcode(OP_RET);
+    } else {
+        emit_void_return();
+    }
+
     end_scope();
 
     return func;
@@ -1161,13 +1179,7 @@ static void print_statement(void) {
 
 static void return_statement(void) {
     if (match(TOKEN_SEMICOLON)) {
-        emit_stack_push_value(0);
-
-        if (parser.current_function_label != entry_point_label) {
-            emit_stack_swap();
-        }
-
-        emit_opcode(OP_RET);
+        emit_void_return();
     } else {
         expression();
         consume(TOKEN_SEMICOLON, "Expected ';' after return value");

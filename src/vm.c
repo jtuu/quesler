@@ -277,10 +277,11 @@ static InterpretResult run(void) {
 
         switch (opcode) {
             case OP_RET: {
-                    int32_t ret_addr = AS_DWORD(stack_pop());
-                    vm.ip = vm.chunk->code + ret_addr;
                     if (stack_empty()) {
                         return INTERPRET_OK;
+                    } else {
+                        int32_t ret_addr = AS_DWORD(stack_pop());
+                        vm.ip = vm.chunk->code + ret_addr;
                     }
                     break;
                 }
