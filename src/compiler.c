@@ -60,7 +60,7 @@ typedef struct {
 typedef struct {
     Token name;
     int depth;
-    bool defined;
+    bool initialized;
     bool allocated;
     uint8_t reg;
 } Local;
@@ -93,21 +93,6 @@ static bool identifiers_equal(Token* a, Token* b) {
     }
 
     return memcmp(a->start, b->start, a->length) == 0;
-}
-
-static int alloc_register(void) {
-    for (int i = 0; i < NUM_REGISTERS; i++) {
-        if (parser.free_registers[i]) {
-            parser.free_registers[i] = false;
-            return i;
-        }
-    }
-
-    return -1;
-}
-
-static void free_register(uint8_t reg) {
-    parser.free_registers[reg] = true;
 }
 
 static Chunk* current_chunk(void) {
@@ -145,6 +130,29 @@ static void error(const char* message) {
 
 static void error_alloc_register(void) {
     error("Failed to allocate register");
+}
+
+int register_alloc_counter = 0;
+
+static int alloc_register(void) {
+    for (int i = 0; i < NUM_REGISTERS; i++) {
+        if (parser.free_registers[i]) {
+            parser.free_registers[i] = false;
+            register_alloc_counter++;
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+static void free_register(uint8_t reg) {
+    if (parser.free_registers[reg]) {
+        error("Register double free");
+    }
+
+    parser.free_registers[reg] = true;
+    register_alloc_counter--;
 }
 
 static size_t take_label(void) {
@@ -276,6 +284,9 @@ static void emit_byte(uint8_t byte) {
 static void emit_string(uint16_t* str) {
     while (*str != 0) {
         uint16_t chr = *str;
+        uint8_t b1 = (uint8_t) (chr >> 8);
+        uint8_t b2 = (uint8_t) (chr & 0xff);
+        chr = (uint16_t) ((b2 << 8) | b1);
         EMIT(uint16_t, chr);
         str++;
     }
@@ -404,20 +415,9 @@ static void begin_scope(void) {
 static void end_scope(void) {
     current->scope_depth--;
 
-    int ret = alloc_register();
-    if (ret < 0) {
-        error_alloc_register();
-    } else {
-        uint8_t reg = (uint8_t) ret;
-
-        while (current->local_count > 0 &&
-            current->locals[current->local_count - 1].depth >
-                current->scope_depth) {
-
-            current->local_count--;
-        }
-
-        free_register(reg);
+    while (current->local_count > 0 && current->locals[current->local_count - 1].depth > current->scope_depth) {
+        free_register(current->locals[current->local_count - 1].reg);
+        current->local_count--;
     }
 }
 
@@ -427,7 +427,23 @@ static void init_compiler(Compiler* compiler) {
     current = compiler;
 }
 
+static const OpcodeDefinition* get_opcode_definition_from_token(Token* name) {
+    char str[64];
+    size_t len = name->length > 63 ? 63 : name->length;
+    strncpy(str, name->start, len);
+    str[len] = '\0';
+    return get_opcode_definition_by_name(str);
+}
+
+
 static void define_function(Function* func) {
+    if (get_opcode_definition_from_token(&func->name) != NULL) {
+        char str[128];
+        snprintf(str, 128, "Function shadows opcode \"%.*s\"", (int) func->name.length, func->name.start);
+        error(str);
+        return;
+    }
+
     if (parser.functions_capacity < parser.functions_count + 1) {
         size_t old_capacity = parser.functions_capacity;
         parser.functions_capacity = GROW_CAPACITY(old_capacity);
@@ -581,31 +597,148 @@ static Function* resolve_function(Token* name) {
 static void call(bool can_assign) {
     UNUSED(can_assign);
 
-    Function* func = resolve_function(&parser.previous2);
-    if (func == NULL) {
-        error("Call target is not a function");
-        return;
-    }
+    size_t arity = 0;
+    size_t effective_arity = 0;
+    Function* func = NULL;
+    const OpcodeDefinition* opcode = get_opcode_definition_from_token(&parser.previous2);
+    
+    if (opcode) {
+        arity = get_opcode_arity(opcode);
 
+        for (size_t i = 0; i < OPCODE_MAX_ARITY; i++) {
+            if (opcode->parameters[i] == T_BREG) {
+                effective_arity = arity - 1;
+                break;
+            }
+        }
+    } else {
+        func = resolve_function(&parser.previous2);
+
+        if (!func) {
+            error("Call target is not a function or an opcode");
+            return;
+        }
+
+        effective_arity = arity = func->arity;
+    }
+    
     // Save locals
+    int num_saved_locals = 0;
     for (size_t i = 0; i < current->local_count; i++) {
-        emit_stack_push(current->locals[i].reg);
+        if (current->locals[i].initialized) {
+            emit_stack_push(current->locals[i].reg);
+            num_saved_locals++;
+        }
     }
 
     size_t arg_count = argument_list();
 
-    if (arg_count > func->arity) {
+    if (arg_count > effective_arity) {
         error("Too many arguments");
         return;
-    } else if (arg_count < func->arity) {
+    } else if (arg_count < effective_arity) {
         error("Not enough arguments");
         return;
     }
 
-    emit_call(func->label);
+    if (opcode) {
+        if (arity > 0) {
+            if (opcode->parameters[0] == T_ARGS) {
+                // Put args on the arg stack
+
+                uint8_t* regs = malloc(effective_arity);
+
+                // Take args from the stack and put them in registers
+                for (int i = (int) effective_arity - 1; i >= 0; i--) {
+                    int ret = alloc_register();
+
+                    if (ret < 0) {
+                        error_alloc_register();
+
+                        for (int j = 0; j < i; j++) {
+                            free_register(regs[j]);
+                        }
+
+                        break;
+                    }
+
+                    regs[i] = (uint8_t) ret;
+                    emit_stack_pop(regs[i]);
+                }
+
+                bool has_output = false;
+                uint8_t output_reg;
+                size_t arg_reg_i = 0;
+
+                // Put args into the arg stack from registers
+                for (size_t i = 0; i < arity; i++) {
+                    ParameterType param_type = opcode->parameters[i + 1];
+
+                    switch (param_type) {
+                        case T_REG:
+                        case T_DWORD:
+                        case T_FLOAT:
+                        case T_FUNC:
+                        case T_FUNC2:
+                            emit_opcode(OP_ARG_PUSHR);
+                            emit_register(regs[arg_reg_i]);
+                            arg_reg_i++;
+                            break;
+                        case T_BREG:
+                            // A register reference is likely to be the output argument
+                            if (has_output) {
+                                error("Opcode with multiple outputs");
+                                break;
+                            } else {
+                                has_output = true;
+                                
+                                int ret = alloc_register();
+
+                                if (ret < 0) {
+                                    error_alloc_register();
+                                    break;
+                                }
+
+                                output_reg = (uint8_t) ret;
+
+                                emit_opcode(OP_ARG_PUSHB);
+                                emit_byte(output_reg);
+                            }
+                            break;
+                        default: {
+                            char str[128];
+                            snprintf(str, 128, "Unsupported opcode argument type %d", param_type);
+                            error(str);
+                            break;
+                        }
+                    }
+                }
+
+                for (size_t i = 0; i < effective_arity; i++) {
+                    free_register(regs[i]);
+                }
+
+                emit_opcode(opcode->opcode);
+
+                if (has_output) {
+                    emit_stack_push(output_reg);
+                    free_register(output_reg);
+                } else {
+                    emit_stack_push_value(0);
+                }
+
+                free(regs);
+            } else {
+                // TODO: Inline arguments need a completely different way of expression parsing
+                emit_opcode(opcode->opcode);
+            }
+        }
+    } else {
+        emit_call(func->label);
+    }
 
     // Restore locals
-    for (int i = (int) current->local_count - 1; i >= 0; i--) {
+    for (int i = num_saved_locals - 1; i >= 0; i--) {
         emit_stack_pop(current->locals[i].reg);
     }
 }
@@ -628,19 +761,46 @@ static void literal(bool can_assign) {
 
 static void named_variable(Token name, bool can_assign) {
     Local* local = resolve_local(current, &name);
-    if (local == NULL) {
-        Function* function = resolve_function(&name);
 
-        if (function == NULL) {
-            error("Could not resolve variable");
+    if (local == NULL) {
+        const OpcodeDefinition* opcode = get_opcode_definition_from_token(&name);
+        Function* function = NULL;
+
+        if (opcode == NULL) {
+            function = resolve_function(&name);
+
+            if (function == NULL) {
+                error("Could not resolve variable");
+                return;
+            }
+        }
+
+        if (!check(TOKEN_LEFT_PAREN)) {
+            // Not a call, must be a reference
+
+            if (opcode != NULL) {
+                error("Opcodes cannot be referenced");
+                return;
+            }
+
+            emit_stack_push_value((int32_t) function->label);
         }
     } else {
         if (can_assign && match(TOKEN_EQUAL)) {
             // Variable write
             expression();
             emit_stack_peek(local->reg);
+            local->initialized = true;
         } else if (local->depth != -1) {
             // Variable read
+
+            if (!local->initialized) {
+                char str[256];
+                snprintf(str, 256, "Variable \"%.*s\" used before initialization", (int) local->name.length, local->name.start);
+                error(str);
+                return;
+            }
+
             emit_stack_push(local->reg);
         }
     }
@@ -832,7 +992,7 @@ static Local* add_local(Token name) {
     Local* local = &current->locals[current->local_count++];
     local->name = name;
     local->depth = -1;
-    local->defined = false;
+    local->initialized = false;
     local->allocated = false;
     local->reg = 0;
 
@@ -937,7 +1097,9 @@ static Function* function(void) {
     }
 
     for (size_t i = func->arity; i != 0; i--) {
-        define_variable(param_registers[i - 1], &current->locals[current->local_count - (func->arity - i) - 1]);
+        Local* local = &current->locals[current->local_count - (func->arity - i) - 1];
+        define_variable(param_registers[i - 1], local);
+        local->initialized = true;
     }
 
     if (!is_entry_function) {
@@ -976,15 +1138,21 @@ static void let_declaration(void) {
 
     uint8_t reg = (uint8_t) ret;
 
+    bool initialized = false;
+
     if (match(TOKEN_EQUAL)) {
         expression();
+        initialized = true;
     } else {
         emit_stack_push_value(0);
     }
 
     consume(TOKEN_SEMICOLON, "Expected ';' after variable declaration");
 
-    define_variable(reg, &current->locals[current->local_count - 1]);
+    Local* local = &current->locals[current->local_count - 1];
+    define_variable(reg, local);
+
+    local->initialized = initialized;
 }
 
 static void expression_statement(void) {
@@ -1150,6 +1318,8 @@ static void print_statement(void) {
         emit_opcode(OP_WINEND);
 
         free_register(reg);
+
+        free(str);
     }
 }
 
@@ -1272,7 +1442,6 @@ bool compile(const char* source, Chunk* chunk) {
     parser.functions_count = 0;
     parser.functions_capacity = 0;
     
-    parser.free_registers[0] = false;
     for (size_t i = 1; i < NUM_REGISTERS; i++) {
         parser.free_registers[i] = true;
     }
@@ -1289,6 +1458,24 @@ bool compile(const char* source, Chunk* chunk) {
 
     if (!parser.entry_function_exists) {
         error("Missing entry function");
+    }
+
+    if (register_alloc_counter != 0) {
+        fprintf(stderr, "%d unfreed register(s): [", register_alloc_counter);
+
+        bool first = true;
+        for (size_t i = 1; i < NUM_REGISTERS; i++) {
+            if (!parser.free_registers[i]) {
+                if (first) {
+                    fprintf(stderr, "%lu", i);
+                    first = false;
+                } else {
+                    fprintf(stderr, ", %lu", i);
+                }
+            }
+        }
+
+        fprintf(stderr, "]\n");
     }
 
     return !parser.had_error;

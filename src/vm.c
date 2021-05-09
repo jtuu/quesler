@@ -12,10 +12,10 @@ VM vm;
 
 #define READ1() (*vm.ip++)
 #define READ2() \
-    (vm.ip += 2, (vm.ip[-1] << 8 | vm.ip[-2]))
+    (vm.ip += 2, (vm.ip[-2] << 8 | vm.ip[-1]))
 #define READ4() \
-    (vm.ip += 4, (vm.ip[-1] << 24 | vm.ip[-2] << 16 | \
-                  vm.ip[-3] << 8  | vm.ip[-4]))
+    (vm.ip += 4, (vm.ip[-4] << 24 | vm.ip[-3] << 16 | \
+                  vm.ip[-2] << 8  | vm.ip[-1]))
 #define READF() \
     (vm.ip += 4, *(float*) &vm.ip[-4])
 
@@ -268,6 +268,11 @@ static InterpretResult run(void) {
 
         const OpcodeDefinition* opcode_def = get_opcode_definition(opcode);
 
+        if (opcode_def == NULL) {
+            fprintf(stderr, "VM: Invalid opcode 0x%04x\n", opcode);
+            return INTERPRET_RUNTIME_ERROR;
+        }
+
         bool has_stack_args = opcode_def->parameters[0] == T_ARGS;
 
         Value stack_args[ARG_STACK_LEN];
@@ -285,6 +290,16 @@ static InterpretResult run(void) {
                     }
                     break;
                 }
+            case OP_ARG_PUSHB: {
+                uint8_t b = READ1();
+                arg_stack_push(BYTE_VAL(b));
+                break;
+            }
+            case OP_ARG_PUSHR: {
+                uint8_t reg = READ1();
+                arg_stack_push(vm.registers[reg]);
+                break;
+            }
             case OP_ARG_PUSHS: {
                     uint16_t* str_start = (uint16_t*) vm.ip;
                     uint16_t* str_end = (uint16_t*)  vm.ip;
@@ -406,6 +421,13 @@ static InterpretResult run(void) {
             }
             case OP_WINEND:
                 break;
+            case OP_GET_FLOOR_NUMBER:
+                vm.registers[AS_DWORD(stack_args[0])] = DWORD_VAL(123);
+                break;
+            default: {
+                fprintf(stderr, "VM: Unsupported opcode \"%s\"\n", opcode_def->name);
+                break;
+            }
         }
 
         if (has_stack_args) {

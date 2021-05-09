@@ -3,6 +3,7 @@
 
 #include "common.h"
 #include "value.h"
+#include "string.h"
 
 typedef struct {
     size_t count;
@@ -24,7 +25,9 @@ void set_chunk_label_offset(Chunk* chunk, size_t label, int32_t offset);
 #define WRITE_CHUNK(chunk, type, value, line) \
     do { \
         type temp = value; \
-        write_chunk(chunk, sizeof(type), (uint8_t*) &(temp), line); \
+        char buf[sizeof(type)]; \
+        memcpy(buf, &(temp), sizeof(type)); \
+        write_chunk(chunk, sizeof(type), (uint8_t*) buf, line); \
     } while (false)
 
 #endif

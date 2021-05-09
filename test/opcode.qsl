@@ -1,0 +1,4 @@
+function main() {
+    let floor = get_floor_number(0);
+    print floor;
+}

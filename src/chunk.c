@@ -24,7 +24,7 @@ void write_chunk(Chunk* chunk, size_t add_size, uint8_t* bytes, size_t line) {
             old_capacity, chunk->capacity);
     }
 
-    for (size_t i = 0; i < add_size; i++) {
+    for (int i = (int) add_size - 1; i >= 0; i--) {
         chunk->lines[chunk->count] = line;
         chunk->code[chunk->count] = bytes[i];
         chunk->count++;

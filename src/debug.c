@@ -11,9 +11,9 @@ void disassemble_chunk(Chunk* chunk, const char* name, bool line_info) {
     }
 }
 
-#define READ2(buf) ((buf)[1] << 8 | (buf)[0])
-#define READ4(buf) ((buf)[3] << 24 | (buf)[2] << 16 | \
-                    (buf)[1] << 8 | (buf)[0])
+#define READ2(buf) ((buf)[0] << 8 | (buf)[1])
+#define READ4(buf) ((buf)[0] << 24 | (buf)[1] << 16 | \
+                    (buf)[2] << 8 | (buf)[3])
 
 size_t disassemble_instruction(Chunk* chunk, size_t offset, bool line_info) {
     for (size_t i = 0; i < chunk->labels_count; i++) {
@@ -74,6 +74,7 @@ size_t disassemble_instruction(Chunk* chunk, size_t offset, bool line_info) {
 
             switch (param_type) {
                 case T_REG:
+                case T_BREG:
                     printf("R%hhu", *arg);
                     break;
                 case T_DWORD:

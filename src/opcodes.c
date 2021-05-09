@@ -1,3 +1,4 @@
+#include <string.h>
 #include "opcodes.h"
 
 const int parameter_sizes[NUM_PARAMETER_KINDS] = {
@@ -546,10 +547,34 @@ const OpcodeDefinition* get_opcode_definition(Opcode opcode) {
     return NULL;
 }
 
+const OpcodeDefinition* get_opcode_definition_by_name(char* name) {
+    for (size_t i = 0; i < NUM_OPCODES; i++) {
+        if (strcmp(opcodes[i].name, name) == 0) {
+            return &opcodes[i];
+        }
+    }
+
+    return NULL;
+}
+
 bool is_variable_sized(ParameterType type) {
     return parameter_sizes[type] == VARIABLE_SIZED;
 }
 
 size_t get_parameter_size(ParameterType type) {
     return (size_t) parameter_sizes[type];
+}
+
+size_t get_opcode_arity(const OpcodeDefinition* opcode) {
+    size_t arity = 0;
+
+    for (size_t i = 0; i < OPCODE_MAX_ARITY; i++) {
+        if (opcode->parameters[i] == T_NONE) {
+            break;
+        } else if (opcode->parameters[i] != T_ARGS && opcode->parameters[i] != T_IMED) {
+            arity++;
+        }
+    }
+
+    return arity;
 }

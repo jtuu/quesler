@@ -556,8 +556,12 @@ typedef enum {
 
 const OpcodeDefinition* get_opcode_definition(Opcode opcode);
 
+const OpcodeDefinition* get_opcode_definition_by_name(char* name);
+
 size_t get_parameter_size(ParameterType type);
 
 bool is_variable_sized(ParameterType type);
+
+size_t get_opcode_arity(const OpcodeDefinition* opcode);
 
 #endif
